@@ -199,6 +199,14 @@ class FrameGridRender(unittest.TestCase):
         rms = audio_check.rms_windows(audio_check.pcm(FFMPEG, master, 48000), 48000)
         self.assertGreaterEqual(len(audio_check.dropouts(rms)), 3)
 
+    # Segments from a review probe: lengths between frames, five speeds, a
+    # one-frame shot and a two-frame shot slowed to four.
+    AWKWARD = [{"in": 1.0, "out": 2.3337}, {"in": 2.3337, "out": 4.1, "speed": 0.5},
+               {"in": 5.013, "out": 6.077, "speed": 1.5}, {"in": 6.077, "out": 7.9123, "speed": 2.0},
+               {"in": 9.0, "out": 9.41, "still": True}, {"in": 10.0, "out": 14.0, "speed": 0.75},
+               {"in": 16.0171, "out": 18.9999, "speed": 1.1}, {"in": 20.0, "out": 20.0334},
+               {"in": 21.0, "out": 21.07, "speed": 0.5}, {"in": 23.0, "out": 24.6, "speed": 0.9}]
+
     def source(self, tmp, name, rate, seconds=10):
         """A moving picture at `rate` frames a second with a steady tone."""
         r = subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i",
@@ -237,9 +245,10 @@ class FrameGridRender(unittest.TestCase):
                  ("30", [{"in": 1.0, "out": 1.7, "speed": 0.5, "still": True}, {"in": 3.0, "out": 4.0, "still": True}], 72),
                  ("25", [{"in": 2.0, "out": 2.5, "speed": 0.75}, {"in": 6.02, "out": 7.31}], 20 + 38),
                  ("30000/1001", [{"in": 1.0, "out": 3.9, "speed": 1.1}, {"in": 5.0, "out": 5.9, "speed": 0.5}], 79 + 54),
-                 ("60", [{"in": 1.0, "out": 1.517}, {"in": 4.0, "out": 4.7, "speed": 2}], 15 + 10)]
+                 ("60", [{"in": 1.0, "out": 1.517}, {"in": 4.0, "out": 4.7, "speed": 2}], 15 + 10),
+                 ("15", self.AWKWARD, 505), ("25", self.AWKWARD, 505), ("30", self.AWKWARD, 505)]
         for rate, segments, planned in cases:
-            self.source(tmp, "main.mov", rate)
+            self.source(tmp, "main.mov", rate, seconds=26 if segments is self.AWKWARD else 10)
             shutil.rmtree(os.path.join(tmp, "out"), ignore_errors=True)
             spec = {"id": "a01-demo", "sources": {"main": "main.mov"}, "src": "main", "layout": "full",
                     "bar": "Rates test", "segments": segments}
@@ -269,6 +278,17 @@ class FrameGridRender(unittest.TestCase):
         self.assertIn("WARN the shot at 3.50-4.50 reads past the end of source 'main' (4.00 s)", said)
         self.assertNotIn("off the frame grid", said)
         self.assertEqual(self.lengths(os.path.join(tmp, "out", "base.nut")), (60, 96000))
+        # A shot with nothing of the source left stops the run before any encode.
+        spec["segments"][1] = {"in": 4.5, "out": 5.5}
+        spec_path = os.path.join(tmp, "spec.json")
+        with open(spec_path, "w") as f:
+            json.dump(spec, f)
+        r = subprocess.run([sys.executable, SCRIPT, "render", spec_path, "--out", os.path.join(tmp, "out2"),
+                            "--words", os.path.join(tmp, "caps.json"), "--ffmpeg", FFMPEG, "--ffprobe", FFPROBE,
+                            "--transcribe-cmd", "off"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("starts past the end of source 'main'", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(tmp, "out2", "base.nut")))
 
     def test_wide_compilation_is_on_the_grid_and_fades_out(self):
         tmp = tempfile.mkdtemp(prefix="sts-wide-")

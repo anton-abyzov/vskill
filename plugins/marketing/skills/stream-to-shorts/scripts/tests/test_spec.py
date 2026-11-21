@@ -69,6 +69,11 @@ class LoadSpec(unittest.TestCase):
             self.refused("speed", segments=[{"in": 1.0, "out": 3.0, "speed": bad}])
             self.refused("numeric", segments=[{"in": 1.0, "out": bad}])
 
+    def test_times_are_numbers_not_text(self):
+        for seg in ({"in": "1.0", "out": 3.0}, {"in": 1.0, "out": "3.0"}, {"in": True, "out": 3.0},
+                    {"in": None, "out": 3.0}, {"in": [1.0], "out": 3.0}, 5, "1-3"):
+            self.refused("numeric", segments=[seg])
+
     def test_groups_must_be_objects(self):
         self.refused("variants", variants=["b"])
         self.refused("variants", variants={"b": "bar"})

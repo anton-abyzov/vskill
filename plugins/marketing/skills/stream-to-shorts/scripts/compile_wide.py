@@ -206,11 +206,11 @@ def main(argv=None):
                 af = cutplan.shot_audio_filter(s)
                 ain = []
                 if "g_in" in s:
-                    ain = ["-ss", "%.3f" % s["g_in"], "-t", "%.3f" % d, "-i", src]
+                    ain = ["-ss", "%.3f" % s["g_in"], "-t", "%.3f" % cutplan.read_length(s), "-i", src]
                 elif "a_in" in s:
-                    ain = ["-ss", "%.3f" % s["a_in"], "-t", "%.3f" % d, "-i", spec["sources"][s.get("a_src", s["src"])]]
+                    ain = ["-ss", "%.3f" % s["a_in"], "-t", "%.3f" % cutplan.read_length(s), "-i", spec["sources"][s.get("a_src", s["src"])]]
                 p = os.path.join(od, "p%03d.nut" % len(parts))
-                cut_short.run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % d, "-i", src] + ain
+                cut_short.run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % cutplan.read_length(s), "-i", src] + ain
                               + ["-filter_complex", g + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", str(cutplan.FPS)]
                               + cut_short.frame_limit(s) + cut_short.INTERMEDIATE
                               + ["-crf", "14", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],

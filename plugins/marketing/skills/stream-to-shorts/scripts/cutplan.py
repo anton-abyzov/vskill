@@ -25,6 +25,8 @@ import sys
 
 FPS = 30               # the cutter renders every shot at this rate
 AUDIO_RATE = 48000     # and its sound at this one: 1600 samples a frame
+READ_MARGIN = 0.5      # seconds read past a shot's "out"; see read_length
+MAX_FRAMES = FPS * 86400   # a span longer than a day on screen is a typing error
 
 # Layout numbers. Taken from the constants of the cutter that ran
 # (canvas 1080x1920, face 0..640, title bar 640..760, screen 760..1920).
@@ -196,7 +198,11 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
             start = a
             if prev and prev[0] == link and abs(a - prev[1]) < 0.0005:
                 start = prev[2]
-            total = int((b - start) / sp * FPS + 1e-6)      # whole output frames, rounded down
+            length = (b - start) / sp * FPS
+            if not length <= MAX_FRAMES:
+                raise PlanError("segment at %s is over a day long on screen: check \"in\", \"out\" and \"speed\""
+                                % seg.get("in"))
+            total = int(length + 1e-6)                      # whole output frames, rounded down
             prev = (link, b, start + total * sp / float(FPS))
             if total < 1:
                 continue                                    # shorter than one frame
@@ -447,25 +453,39 @@ def shot_video_tail(shot):
     return ";[v]%sfps=%d:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d[v2]" % (head, FPS, shot["frames"])
 
 
+def read_length(shot):
+    """Seconds of source to read for a shot: its length and READ_MARGIN more.
+
+    A read of exactly the shot's length loses frames. The source's frame at
+    "in" can sit a hair before it and be thrown away, and the last frame
+    falls outside a window that ends on its own time; a one-frame shot then
+    has no picture at all and the join fails. The extra is read and not
+    used: shot_video_tail cuts the picture at the frame count, and the sound
+    is silent after its closing fade and cut to length by _exact_length.
+    """
+    return shot["out"] - shot["in"] + READ_MARGIN
+
+
 def past_end(shots, lengths):
-    """Shots that read past the end of a source: [(shot, source key, source length)].
+    """Shots that read past the end of a source: [(shot, source key, source length, starts past it)].
 
     lengths maps a source key to its length in seconds (None when unknown).
-    Such a shot still renders to its planned length, on a held last frame and
-    silence, so it has to be reported. Pure.
+    A shot that ends past the source still renders to its planned length, on
+    a held last frame and silence, so it has to be reported. One that starts
+    there has nothing to show at all (the last element is True). Pure.
     """
     out = []
     for s in shots:
         d = s["out"] - s["in"]
-        reads = [(s["src"], s["in"] + d)]
+        reads = [(s["src"], s["in"])]
         if "g_in" in s:
-            reads.append((s["src"], s["g_in"] + d))
+            reads.append((s["src"], s["g_in"]))
         elif "a_in" in s:
-            reads.append((s.get("a_src", s["src"]), s["a_in"] + d))
-        for key, end in reads:
+            reads.append((s.get("a_src", s["src"]), s["a_in"]))
+        for key, start in reads:
             have = lengths.get(key)
-            if have is not None and end > have + 0.05:
-                out.append((s, key, have))
+            if have is not None and start + d > have + 0.05:
+                out.append((s, key, have, start > have - 0.05))
                 break
     return out
 
@@ -488,6 +508,9 @@ def main(argv=None):
         shots = timeline(expand_shots(spec, args.variant))
     except (OSError, ValueError, KeyError) as e:
         print("cutplan: %s" % e, file=sys.stderr)
+        return 1
+    except (TypeError, AttributeError, ArithmeticError) as e:
+        print("cutplan: the spec is not in the expected form (%s). Check it with cut_short.py plan" % e, file=sys.stderr)
         return 1
     for s in shots:
         print("%6.2f %5.2f  %s %.2f-%.2f z%s" % (s["t0"], s["t1"] - s["t0"], s["src"], s["in"], s["out"], s["z"]))

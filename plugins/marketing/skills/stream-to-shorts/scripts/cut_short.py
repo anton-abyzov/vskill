@@ -147,9 +147,9 @@ def load_spec(path):
             raise CutError("spec %s must be a non-empty list" % name)
         for i, seg in enumerate(segs):
             try:
-                ok = float(seg["out"]) > float(seg["in"])
-                if not (math.isfinite(float(seg["in"])) and math.isfinite(float(seg["out"]))):
+                if not (number(seg["in"]) and number(seg["out"])):
                     raise ValueError
+                ok = seg["out"] > seg["in"]
             except (KeyError, TypeError, ValueError):
                 raise CutError("%s[%d] needs numeric \"in\" and \"out\"" % (name, i))
             if not ok:
@@ -280,7 +280,6 @@ def build(spec, shots, outdir, variant, ff, fp, env):
                 raise CutError("source %r not found: %s" % (src_key, src))
             sizes[src_key] = probe_size(fp, src)
         sw, sh = sizes[src_key]
-        d = s["out"] - s["in"]
         try:
             vf = cutplan.shot_video_filter(s, layout_name, sw, sh, spec.get("facecam"))
         except cutplan.PlanError as e:
@@ -289,11 +288,11 @@ def build(spec, shots, outdir, variant, ff, fp, env):
         af = cutplan.shot_audio_filter(s)
         ain = []
         if "g_in" in s:
-            ain = ["-ss", "%.3f" % s["g_in"], "-t", "%.3f" % d, "-i", src]
+            ain = ["-ss", "%.3f" % s["g_in"], "-t", "%.3f" % cutplan.read_length(s), "-i", src]
         elif "a_in" in s:
-            ain = ["-ss", "%.3f" % s["a_in"], "-t", "%.3f" % d, "-i", spec["sources"][s.get("a_src", src_key)]]
+            ain = ["-ss", "%.3f" % s["a_in"], "-t", "%.3f" % cutplan.read_length(s), "-i", spec["sources"][s.get("a_src", src_key)]]
         p = os.path.join(outdir, "shot%03d.nut" % i)
-        run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % d, "-i", src] + ain
+        run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % cutplan.read_length(s), "-i", src] + ain
             + ["-filter_complex", vf + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", str(cutplan.FPS)]
             + frame_limit(s) + INTERMEDIATE
             + ["-crf", "12", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
@@ -323,14 +322,20 @@ def frame_limit(shot):
 
 
 def past_end_warnings(spec, shots, ffprobe):
-    """A WARN line for every shot that reads past the end of its source."""
+    """A WARN line for every shot that reads past the end of its source.
+    A shot that starts past the end has nothing to render and stops the run."""
     keys = set()
     for s in shots:
         keys.update((s["src"], s.get("a_src", s["src"])))
     lengths = {k: probe_length(ffprobe, spec["sources"][k]) for k in keys if os.path.exists(spec["sources"][k])}
-    return ["WARN the shot at %.2f-%.2f reads past the end of source %r (%.2f s): it holds the last frame over "
-            "silence there. Fix its \"in\" and \"out\"" % (s["in"], s["out"], key, have)
-            for s, key, have in cutplan.past_end(shots, lengths)]
+    out = []
+    for s, key, have, nothing in cutplan.past_end(shots, lengths):
+        if nothing:
+            raise CutError("the shot at %.2f-%.2f starts past the end of source %r (%.2f s): fix its times"
+                           % (s["in"], s["out"], key, have))
+        out.append("WARN the shot at %.2f-%.2f reads past the end of source %r (%.2f s): it holds the last frame "
+                   "over silence there. Fix its \"in\" and \"out\"" % (s["in"], s["out"], key, have))
+    return out
 
 
 def bed_gain(ff, level, env):

@@ -176,10 +176,62 @@ class FrameGrid(unittest.TestCase):
                  {"src": "main", "in": 2.0, "out": 3.0, "a_in": 29.5, "a_src": "mic"},
                  {"src": "main", "in": 2.0, "out": 3.0, "a_in": 28.0, "a_src": "mic"}]
         got = cutplan.past_end(shots, {"main": 10.0, "mic": 30.0})
-        self.assertEqual([(shots.index(s), key, have) for s, key, have in got],
-                         [(1, "main", 10.0), (2, "main", 10.0), (3, "mic", 30.0)])
+        self.assertEqual([(shots.index(s), key, have, nothing) for s, key, have, nothing in got],
+                         [(1, "main", 10.0, False), (2, "main", 10.0, False), (3, "mic", 30.0, False)])
         self.assertEqual(cutplan.past_end(shots, {"main": None}), [])            # a length that cannot be read
         self.assertEqual(cutplan.past_end([{"src": "main", "in": 9.0, "out": 10.04}], {"main": 10.0}), [])
+        for start in (10.0, 12.5, 9.97):                                         # nothing of the source is left to show
+            got = cutplan.past_end([{"src": "main", "in": start, "out": start + 1}], {"main": 10.0})
+            self.assertEqual([x[3] for x in got], [True], start)
+        got = cutplan.past_end([{"src": "main", "in": 2.0, "out": 3.0, "a_in": 31.0, "a_src": "mic"}], {"mic": 30.0})
+        self.assertEqual([(x[1], x[3]) for x in got], [("mic", True)])
+
+    def test_a_shot_that_starts_past_its_source_stops_the_run(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        src = os.path.join(d, "main.mp4")
+        open(src, "w").close()
+        fp = stand_in(d, "fp", "print('10.0')\n")
+        sp = {"sources": {"main": src}}
+        lines = cut_short.past_end_warnings(sp, [{"src": "main", "in": 9.5, "out": 10.5}], fp)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("WARN the shot at 9.50-10.50 reads past the end of source 'main' (10.00 s)", lines[0])
+        self.assertEqual(cut_short.past_end_warnings(sp, [{"src": "main", "in": 1.0, "out": 2.0}], fp), [])
+        with self.assertRaises(cut_short.CutError) as cm:
+            cut_short.past_end_warnings(sp, [{"src": "main", "in": 1.0, "out": 2.0}, {"src": "main", "in": 11.0, "out": 12.0}], fp)
+        self.assertIn("starts past the end of source 'main'", str(cm.exception))
+
+    def test_a_shot_is_read_past_its_out(self):
+        # A read of exactly the shot's length can hold no frame at all.
+        self.assertAlmostEqual(cutplan.read_length({"in": 7.0, "out": 7.033}), 0.533)
+        self.assertGreaterEqual(cutplan.READ_MARGIN, 0.25)
+
+    def test_a_span_over_a_day_long_is_a_typing_error(self):
+        for seg in ({"in": 0.0, "out": 1e300}, {"in": 1.0, "out": 2.0, "speed": 1e-300},
+                    {"in": 0.0, "out": 90000.0}, {"in": 0.0, "out": 1e308, "speed": 1e-300}):
+            with self.assertRaises(cutplan.PlanError) as cm:
+                expand_shots(spec(seg))
+            self.assertIn("day", str(cm.exception), seg)
+        self.assertEqual(sum(s["frames"] for s in expand_shots(spec({"in": 0.0, "out": 3600.0}))), 108000)
+
+    def test_the_plan_printer_answers_a_broken_spec_in_one_line(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        p = os.path.join(d, "spec.json")
+        ok = {"src": "main", "segments": [{"in": 1.0, "out": 2.0}]}
+        for bad in (dict(ok, shot=0), dict(ok, shot="x"), [1], dict(ok, segments=[5]),
+                    dict(ok, segments=[{"in": "1", "out": 2.0}]), dict(ok, segments=5), {"src": "main"}):
+            with open(p, "w") as f:
+                json.dump(bad, f)
+            err, old = io.StringIO(), sys.stderr
+            sys.stderr = err
+            try:
+                code = cutplan.main([p])
+            finally:
+                sys.stderr = old
+            self.assertEqual(code, 1, bad)
+            self.assertTrue(err.getvalue().startswith("cutplan: "), bad)
+            self.assertEqual(len(err.getvalue().strip().splitlines()), 1, bad)
 
     def test_sound_is_cut_to_the_frame_count(self):
         a = cutplan.shot_audio_filter({"in": 0, "out": 0.467, "frames": 14})

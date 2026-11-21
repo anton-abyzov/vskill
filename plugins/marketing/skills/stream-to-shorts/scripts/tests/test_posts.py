@@ -1124,5 +1124,86 @@ class Round3(Base):
         self.assertFalse(posts.Blotato.queued(posts.Blotato.flat(dict(base, status="published"))))
 
 
+class Round4(Base):
+    """Fourth review round: the queue listing on Blotato, rows with no clip id,
+    a plan cap that cannot be read."""
+
+    def test_blotato_state_lists_entries_by_their_status(self):
+        def item(i, **extra):
+            return dict({"id": "s%d" % i, "scheduledAt": "2026-12-01T15:0%d:00Z" % i,
+                         "draft": {"accountId": "REF_TT"}}, **extra)
+        items = [item(1), item(2, status="scheduled"), item(3, status="QUEUED"), item(4, state="pending"),
+                 item(5, status="queue"), item(6, status="published"), item(7, status="failed"),
+                 item(8, status="scheduled", publicUrl="https://v.example.invalid/8")]
+        t = FakeTransport(BBASE).on("GET", "/schedules", lambda p, b: (200, {"items": items}))
+        self.assertEqual(self.run_main(["state"], t, env_blotato(), "blotato"), 0, self.err)
+        for i in (1, 2, 3, 4, 5):
+            self.assertIn('"s%d"' % i, self.out)
+        for i in (6, 7, 8):
+            self.assertNotIn('"s%d"' % i, self.out)
+        self.assertIn("5 posts", self.out)
+        self.assertEqual(self.run_main(["state", "--all"], t, env_blotato(), "blotato"), 0, self.err)
+        self.assertIn("8 posts", self.out)
+
+    def test_postiz_state_listing_is_unchanged(self):
+        rows = [dict(queued_post("p1")["posts"][0]), dict(queued_post("p2", state=None)["posts"][0]),
+                dict(queued_post("p3", state="PUBLISHED")["posts"][0]),
+                dict(queued_post("p4", release="https://v.example.invalid/4")["posts"][0])]
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (200, {"posts": rows}))
+        self.assertEqual(self.run_main(["state"], t, env_postiz()), 0, self.err)
+        self.assertIn("2 posts", self.out)
+
+    def clipless(self):
+        plan = simple_plan([(None, "yt-main", "REF_YT", "2026-12-01T15:00:00Z", "first caption"),
+                            (None, "yt-main", "REF_YT", "2026-12-03T15:00:00Z", "another caption"),
+                            (None, "yt-main", "REF_YT", "2026-12-03T15:00:20Z", "third caption"),     # same minute
+                            (None, None, "REF_ES", "2026-12-01T15:00:00Z", "first caption")])
+        for r in plan["posts"]:
+            for k in ("clip", "account"):
+                if r[k] is None:
+                    del r[k]
+        return plan
+
+    def test_rows_without_a_clip_id_are_all_created(self):
+        n = {"i": 0}
+
+        def post(p, b):
+            n["i"] += 1
+            return 201, [{"postId": "new%d" % n["i"]}]
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (200, {"posts": []}))
+        t.on("POST", "/api/public/v1/posts", post)
+        self.assertEqual(self.run_main(["create", self.write("plan.json", self.clipless()), "--go"],
+                                       t, env_postiz()), 0, self.err)
+        self.assertNotIn("in receipts", self.out)
+        self.assertEqual(self.out.count("created new"), 3)
+        self.assertEqual(self.out.count("skip: already in the queue"), 1)
+        # a second run finds them in the live queue, not in the receipts
+        live = [{"id": "e%d" % i, "integration": {"id": r["ref"]}, "publishDate": r["when_utc"],
+                 "content": r["content"]["text"], "state": "QUEUE"} for i, r in enumerate(self.clipless()["posts"])]
+        t2 = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (200, {"posts": live}))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", self.clipless()), "--go"],
+                                       t2, env_postiz()), 0, self.err)
+        self.assertEqual(self.out.count("skip: already in the queue"), 4)
+        self.assertEqual(t2.writes(), [])
+
+    def test_dry_run_of_rows_without_a_clip_id(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (200, {"posts": []}))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", self.clipless())], t, env_postiz()), 0)
+        self.assertEqual(self.out.count("dry-run"), 3)
+
+    def test_plan_cap_that_cannot_be_read_stops_before_any_call(self):
+        for cap in ({"max": 3}, {"window_hours": "x", "max": 3}, {"window_hours": float("inf"), "max": 3},
+                    {"window_hours": 24, "max": None}, "cap"):
+            plan = simple_plan(Round3.DOUBLED[:1])
+            plan["caps"] = [dict({"name": "c", "refs": ["REF_YT"]}, **cap) if isinstance(cap, dict) else cap]
+            p = self.path("plan.json")
+            with open(p, "w") as f:
+                f.write(json.dumps(plan))                    # json writes Infinity as is
+            t = FakeTransport(BASE)
+            self.assertEqual(self.run_main(["create", p, "--go"], t, env_postiz()), 1, cap)
+            self.assertIn("plan cap", self.err)
+            self.assertEqual(t.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

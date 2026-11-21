@@ -349,5 +349,12 @@ class Round3(unittest.TestCase):
         self.assertEqual(d[5], "y")
 
 
+class Round4(unittest.TestCase):
+    def test_secret_in_the_name_of_a_header_pair(self):
+        self.assertEqual(redact(["Bearer " + OPAQUE, "value"]), ["Bearer [redacted]", "[redacted]"])
+        self.assertEqual(redact(("Authorization: " + OPAQUE, "v")), ["Authorization: [redacted]", "[redacted]"])
+        self.assertEqual(redact(["X-Api-Key", OPAQUE]), ["X-Api-Key", "[redacted]"])
+
+
 if __name__ == "__main__":
     unittest.main()

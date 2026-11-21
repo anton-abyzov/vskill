@@ -173,7 +173,7 @@ def redact(obj):
     if isinstance(obj, (list, tuple)):
         if len(obj) == 2 and isinstance(obj[0], str) and is_secret_key(obj[0]) \
                 and not isinstance(obj[1], (dict, list, tuple)):
-            return [obj[0], MASK]      # a ["X-Secret", "value"] header pair
+            return [redact_text(obj[0]), MASK]      # a ["X-Secret", "value"] header pair
         return [redact(x) for x in obj]
     if isinstance(obj, str):
         return redact_text(obj)

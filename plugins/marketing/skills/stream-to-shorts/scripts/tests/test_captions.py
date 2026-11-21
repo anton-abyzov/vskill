@@ -220,5 +220,29 @@ class Round3(unittest.TestCase):
         self.assertIn("\\{x: 2\\}", events(es, "Label")[0])
 
 
+class Round4(unittest.TestCase):
+    def test_ass_text_line_ends(self):
+        self.assertEqual(captions.ass_text("a\r\nb\rc\nd"), "a\\Nb\\Nc\\Nd")
+
+    def test_wide_layout_escapes_braces_too(self):
+        import compile_wide
+        import re
+        spec = dict(SPEC, translations={"es": {"bar": "el {id} de la demo", "caps": [[0, 2.0, "usa {llaves} aqui"]]}})
+        marks = [(0.0, 4.0, "props {id} in a long title bar")]
+        words = [w("call", 0.0, 0.3), w("f({a})", 0.4, 0.8)]
+        for text in (compile_wide.build_wide_ass(marks, words),
+                     compile_wide.build_wide_ass(marks, words, [spec], "es")):
+            for line in events(text):
+                body = line.split(",", 9)[9]
+                rest = body[body.index("}") + 1:].replace("\\{", "").replace("\\}", "")
+                self.assertEqual(len(re.findall(r"[{}]", rest)), 0, line)
+        en = compile_wide.build_wide_ass(marks, words)
+        self.assertIn("\\{ID\\}", "".join(events(en, "Bar")))
+        self.assertIn("F(\\{A\\})", events(en, "Cap")[-1])
+        es = compile_wide.build_wide_ass(marks, words, [spec], "es")
+        self.assertIn("\\{ID\\}", "".join(events(es, "Bar")))
+        self.assertIn("usa \\{llaves\\} aqui", events(es, "Cap")[0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -56,7 +56,8 @@ def bar_font_size(text, width=780, char_w=0.52, caps=(74, 46)):
 def ass_text(s):
     """Text for a Dialogue line: braces escaped, so "{x}" from a code stream is
     shown and not read as an override tag; line breaks become \\N."""
-    return str(s).replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
+    s = str(s).replace("\r\n", "\n").replace("\r", "\n")
+    return s.replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
 
 
 def ass_color(c):

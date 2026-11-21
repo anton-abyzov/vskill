@@ -64,6 +64,25 @@ class LoadSpec(unittest.TestCase):
             self.refused("variants.b.segments[0]", variants={"b": {"segments": [seg]}})
         self.assertEqual(self.load(segments=[{"in": 1.0, "out": 3.0, "speed": 1.5}])["segments"][0]["speed"], 1.5)
 
+    def test_speed_and_times_must_be_finite(self):
+        for bad in (float("nan"), float("inf")):
+            self.refused("speed", segments=[{"in": 1.0, "out": 3.0, "speed": bad}])
+            self.refused("numeric", segments=[{"in": 1.0, "out": bad}])
+
+    def test_groups_must_be_objects(self):
+        self.refused("variants", variants=["b"])
+        self.refused("variants", variants={"b": "bar"})
+        self.refused("translations", translations=[{"es": {}}])
+        self.refused("translations", translations={"es": None})
+        self.refused("sources", sources=["src.mp4"])
+        self.refused("sources", sources={"main": 5})
+        self.refused("transcripts", transcripts="words.json")
+        p = os.path.join(self.d, "list.json")
+        with open(p, "w") as f:
+            f.write("[1, 2]")
+        with self.assertRaises(cut_short.CutError):
+            cut_short.load_spec(p)
+
 
 class WideWindows(unittest.TestCase):
     def test_face_square_stays_inside_a_portrait_source(self):

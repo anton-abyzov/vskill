@@ -34,6 +34,7 @@ Exit codes: 0 done, 1 bad spec or failed tool, 2 bad arguments.
 """
 import argparse
 import json
+import math
 import os
 import re
 import shlex
@@ -92,6 +93,12 @@ def load_spec(path):
             spec = json.load(f)
     except (OSError, ValueError) as e:
         raise CutError("cannot read spec %s: %s" % (path, e))
+    if not isinstance(spec, dict):
+        raise CutError("spec %s must be a JSON object" % path)
+    for field in ("sources", "transcripts"):
+        group = spec.get(field, {})
+        if not isinstance(group, dict) or not all(isinstance(v, str) for v in group.values()):
+            raise CutError("spec \"%s\" must be an object of paths: {key: \"file\"}" % field)
     base = os.path.dirname(os.path.abspath(path))
     for field in ("sources", "transcripts"):
         spec[field] = {k: (v if os.path.isabs(os.path.expanduser(v)) else os.path.join(base, v))
@@ -99,6 +106,10 @@ def load_spec(path):
         spec[field] = {k: os.path.expanduser(v) for k, v in spec[field].items()}
     if not spec.get("id"):
         raise CutError("spec has no \"id\"")
+    for field in ("variants", "translations"):
+        group = spec.get(field, {})
+        if not isinstance(group, dict) or not all(isinstance(v, dict) for v in group.values()):
+            raise CutError("spec \"%s\" must be an object of objects: {name: {...}}" % field)
     # These become file names and part of an ffmpeg filter: plain names only.
     names = [("id", spec["id"])]
     names += [("variant name", k) for k in spec.get("variants", {})]
@@ -120,12 +131,14 @@ def load_spec(path):
         for i, seg in enumerate(segs):
             try:
                 ok = float(seg["out"]) > float(seg["in"])
+                if not (math.isfinite(float(seg["in"])) and math.isfinite(float(seg["out"]))):
+                    raise ValueError
             except (KeyError, TypeError, ValueError):
                 raise CutError("%s[%d] needs numeric \"in\" and \"out\"" % (name, i))
             if not ok:
                 raise CutError("%s[%d]: \"out\" must be after \"in\"" % (name, i))
             sp = seg.get("speed", 1.0)
-            if isinstance(sp, bool) or not isinstance(sp, (int, float)) or sp <= 0:
+            if isinstance(sp, bool) or not isinstance(sp, (int, float)) or not math.isfinite(sp) or sp <= 0:
                 raise CutError("%s[%d]: \"speed\" must be a number above 0" % (name, i))
     if not spec.get("sources"):
         raise CutError("spec has no \"sources\": {key: path}")

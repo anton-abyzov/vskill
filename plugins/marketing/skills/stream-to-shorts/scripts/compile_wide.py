@@ -125,19 +125,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if lang and mark_specs:
             bar = captions.translation(mark_specs[i], lang).get("bar", bar).replace("\n", " ")
         ev.append("Dialogue: 5,%s,%s,Bar,,0,0,0,,{\\pos(%d,%d)}" % (A(a), A(b), SW + PW // 2, wide["bar_y"])
-                  + "\\N".join(textwrap.wrap(bar.upper(), wide["bar_wrap"])))
+                  + "\\N".join(captions.ass_text(x) for x in textwrap.wrap(bar.upper(), wide["bar_wrap"])))
         ev.append("Dialogue: 5,%s,%s,Num,,0,0,0,,{\\pos(%d,%d)}%d / %d" % (A(a), A(b), SW + PW // 2, wide["num_y"], i + 1, len(marks)))
     if lang and mark_specs:
         for (a, b, _), spec in zip(marks, mark_specs):
             for t0, t1, txt in captions.translation(spec, lang).get("caps", []):
                 ev.append("Dialogue: 3,%s,%s,Cap,,0,0,0,,{\\pos(%d,%d)}" % (A(a + t0), A(min(b, a + t1)), SW // 2, wide["cap_y"])
-                          + "\\N".join(textwrap.wrap(txt, 40)))
+                          + "\\N".join(captions.ass_text(x) for x in textwrap.wrap(txt, 40)))
         return head + "\n".join(ev) + "\n"
     chunks = captions.chunk_words(words, max_words=4, max_chars=None)
     for ci, ch in enumerate(chunks):
         nxt = chunks[ci + 1][0]["s"] if ci + 1 < len(chunks) else 1e9
         ev.append("Dialogue: 3,%s,%s,Cap,,0,0,0,,{\\pos(%d,%d)}" % (A(ch[0]["s"]), A(min(ch[-1]["e"] + 0.3, nxt)), SW // 2, wide["cap_y"])
-                  + " ".join(captions.caption_word(x["w"]) for x in ch))
+                  + " ".join(captions.ass_text(captions.caption_word(x["w"])) for x in ch))
     return head + "\n".join(ev) + "\n"
 
 

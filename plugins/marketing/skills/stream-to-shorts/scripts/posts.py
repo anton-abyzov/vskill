@@ -449,6 +449,12 @@ class Postiz:
                 "text": p.get("content") or "", "state": p.get("state"),
                 "release_url": p.get("releaseURL"), "raw": p}
 
+    @staticmethod
+    def in_queue(e):
+        """For listing only: a flat() entry with no release URL and state QUEUE
+        or none. Writes use the stricter _queued()."""
+        return not e["release_url"] and e["state"] in ("QUEUE", None)
+
     def fetch(self, pid):
         st, text = self._internal("GET", "/api/posts/" + path_id(pid))
         return st, _json(text) if st == 200 else text
@@ -514,6 +520,8 @@ class Blotato:
         """True when a flat() entry is still waiting to be published."""
         return not e["release_url"] and e["state"].upper() in BLOTATO_QUEUED
 
+    in_queue = queued
+
 
 # ---------- commands ----------
 
@@ -540,7 +548,7 @@ def cmd_state(ctx, a):
     end = parse_utc(a.to) if a.to else now + dt.timedelta(days=30)
     items = [c.flat(x) for x in c.queue(start, end)]
     if not a.all:
-        items = [e for e in items if not e["release_url"] and e["state"] in ("QUEUE", None)]
+        items = [e for e in items if c.in_queue(e)]
     items.sort(key=lambda e: (e["when"] or dt.datetime.min.replace(tzinfo=UTC), str(e["id"])))
     for e in items:
         ctx.say_view(e["raw"])
@@ -602,6 +610,13 @@ def cmd_create(ctx, a):
         ctx.say("no %s rows in the plan" % c.name)
         return
     caps = plan.get("caps", [])
+    for cap in caps:
+        try:
+            dt.timedelta(hours=float(cap["window_hours"]))
+            int(cap["max"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise Stop("plan cap %s has no usable window_hours and max" % scalar((cap or {}).get("name")
+                                                                             if isinstance(cap, dict) else None))
     recs = read_receipts(ctx.receipts)
     # A post this batch deleted (confirmed gone) may be created again.
     deleted = {str(r["post_id"]) for r in recs
@@ -623,7 +638,7 @@ def cmd_create(ctx, a):
     n = 0
     for r in rows:
         tag = "%s %s %s %s" % (r.get("when_utc"), r.get("platform"), r.get("account"), r.get("clip"))
-        if (r.get("clip"), r.get("account")) in done:
+        if r.get("clip") is not None and (r["clip"], r.get("account")) in done:
             ctx.say(tag + " skip: in receipts")
             continue
         if r.get("ref") is None:
@@ -660,7 +675,8 @@ def cmd_create(ctx, a):
             # Later rows of the same run are checked against this one too: a
             # plan with the same row twice must not create it twice.
             times.setdefault(str(r["ref"]), []).append(t)
-            done.add((r.get("clip"), r.get("account")))
+            if r.get("clip") is not None:       # rows with no clip id are told apart by the queue check only
+                done.add((r["clip"], r.get("account")))
             live.append({"id": None, "ref": str(r["ref"]), "when": t,
                          "text": (r.get("content") or {}).get("text") or "",
                          "state": "QUEUE", "release_url": None})

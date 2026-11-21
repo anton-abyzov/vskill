@@ -481,5 +481,19 @@ class Round3(unittest.TestCase, Props):
         self.assertFalse(ps.window_ok([], t, dt.timedelta(0), 5))
 
 
+class Round4(unittest.TestCase):
+    def test_cap_numbers_must_be_real_numbers(self):
+        clips = [{"id": "a01-demo", "lead": "2026-12-01 10:00"}]
+        accs = [{"key": "yt-main", "platform": "youtube"}]
+        for cap in ({"window_hours": float("inf"), "max": 3}, {"window_hours": float("nan"), "max": 3},
+                    {"window_hours": 1e300, "max": 3}, {"window_hours": True, "max": 3},
+                    {"window_hours": 24, "max": 2.5}, {"window_hours": 24, "max": True},
+                    {"window_hours": "24", "max": 3}, {"window_hours": 24, "max": "3"}):
+            with self.assertRaises(ps.PlanError, msg=cap):
+                ps.plan(clips, accs, [], TZ, caps=[dict({"name": "c", "accounts": ["yt-main"]}, **cap)])
+        for cap in ({"window_hours": 24, "max": 3}, {"window_hours": 0.5, "max": 0}, {"window_hours": 168, "max": 1}):
+            ps.plan(clips, accs, [], TZ, caps=[dict({"name": "c", "accounts": ["yt-main"]}, **cap)])
+
+
 if __name__ == "__main__":
     unittest.main()

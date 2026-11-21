@@ -42,6 +42,7 @@ import argparse
 import csv
 import datetime as dt
 import json
+import math
 import sys
 
 try:
@@ -50,6 +51,8 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None
 
 UTC = dt.timezone.utc
+MAX_WINDOW_HOURS = 24 * 366          # a cap window longer than a year is a typo
+
 DEFAULTS = {"earliest": "07:00", "latest": "22:00", "step": 30,
             "horizon_days": 30, "follow_offset_minutes": 24 * 60,
             "min_gap_hours": 6, "hold_hours": 72}
@@ -187,12 +190,13 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
         for k in c.get("accounts", []):
             if k not in acc_by_key:
                 raise PlanError("cap %s names unknown account %s" % (c.get("name"), k))
-        try:
-            ok = float(c["window_hours"]) > 0 and int(c["max"]) >= 0
-        except (KeyError, TypeError, ValueError):
-            ok = False
+        wh, mx = c.get("window_hours"), c.get("max")
+        ok = (isinstance(wh, (int, float)) and not isinstance(wh, bool) and math.isfinite(wh)
+              and 0 < wh <= MAX_WINDOW_HOURS
+              and isinstance(mx, int) and not isinstance(mx, bool) and mx >= 0)
         if not ok:
-            raise PlanError("cap %s needs window_hours above 0 and a whole max of 0 or more" % c.get("name"))
+            raise PlanError("cap %s needs a number of window_hours above 0 (at most %d) and a whole number max "
+                            "of 0 or more" % (c.get("name"), MAX_WINDOW_HOURS))
 
     clip_by_id = {}
     for c in clips:

@@ -221,6 +221,12 @@ class FrameGrid(unittest.TestCase):
         self.assertEqual([(r["key"], r["field"], r["nothing"]) for r in got], [("mic", "a_in", True)])
         both = cutplan.past_end([{"src": "main", "in": 9.5, "out": 10.5, "g_in": 9.8}], {"main": 10.0})
         self.assertEqual([r["field"] for r in both], ["in", "g_in"])             # each read is reported
+        # A read that starts after the last frame of a slow source has no
+        # picture, even when it ends inside the source.
+        for a, b, nothing in ((9.96, 10.0, [True]), (9.94, 10.5, [True]), (9.92, 9.99, [True]), (9.85, 10.0, []),
+                              (9.85, 10.5, [False])):
+            got = cutplan.past_end([{"src": "main", "in": a, "out": b}], {"main": 10.0})
+            self.assertEqual([r["nothing"] for r in got], nothing, (a, b))
 
     def test_a_shot_that_starts_past_its_source_stops_the_run(self):
         d = tempfile.mkdtemp()
@@ -243,6 +249,13 @@ class FrameGrid(unittest.TestCase):
         with self.assertRaises(cut_short.CutError) as cm:
             cut_short.past_end_warnings(sp, [{"src": "main", "in": 0.0, "out": 1.0, "a_in": 30.0}], fp)
         self.assertIn("(its \"a_in\", 30.00-31.00) starts past the end", str(cm.exception))
+
+    def test_the_sound_of_a_shot_is_cut_at_its_own_length_first(self):
+        # The input is read half a second past the shot; none of that may be heard.
+        a = cutplan.shot_audio_filter({"in": 0.991, "out": 1.0, "frames": 1, "speed": 0.25})
+        self.assertTrue(a.startswith("[0:a]asetpts=PTS-STARTPTS,atrim=end=0.009000,volume="), a)
+        a = cutplan.shot_audio_filter({"in": 5.0, "out": 6.5, "frames": 45, "a_in": 9.0, "gate": 0.02})
+        self.assertTrue(a.startswith("[1:a]asetpts=PTS-STARTPTS,atrim=end=1.500000,agate="), a)
 
     def test_a_shot_is_read_past_its_out(self):
         # The frames after the shot are read too, and cut off by the frame count.
@@ -453,6 +466,28 @@ class Bed(unittest.TestCase):
         self.assertEqual(cut_short.probe_length(ff, "src.mp4"), 12.5)
         self.assertIsNone(cut_short.probe_length(stand_in(self.d, "fp4", "print('N/A')\n"), "src.mp4"))
         self.assertIsNone(cut_short.probe_length(os.path.join(self.d, "missing"), "src.mp4"))
+
+    def test_a_measurement_outside_the_filter_ranges_is_held_inside(self):
+        ok = {"input_i": "-23.10", "input_tp": "-4.20", "input_lra": "3.10", "input_thresh": "-33.40",
+              "target_offset": "0.30"}
+        out, old = io.StringIO(), sys.stdout
+        sys.stdout = out
+        try:
+            plain = cut_short.loudnorm_pass2(ok, 9.0)
+            hot = cut_short.loudnorm_pass2(dict(ok, input_i="1.37", input_thresh="0.52", input_tp="1.90"), 9.0)
+            wild = cut_short.loudnorm_pass2(dict(ok, input_lra="-inf", target_offset="250.0", input_thresh="-inf"), 9.0)
+        finally:
+            sys.stdout = old
+        self.assertEqual(plain, "loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=-23.10:measured_TP=-4.20:measured_LRA=3.10"
+                                ":measured_thresh=-33.40:offset=0.30:linear=false")
+        self.assertIn("measured_I=0.00:measured_TP=1.90:measured_LRA=3.10:measured_thresh=0.00:", hot)
+        self.assertIn("measured_LRA=0.00:measured_thresh=-99.00:offset=99.00:", wild)
+        self.assertEqual(out.getvalue().count("WARN the cut measures 1.4 LUFS"), 1)
+        for bad in ({}, dict(ok, input_tp=None), dict(ok, input_lra="x")):
+            with self.assertRaises(cut_short.CutError):
+                cut_short.loudnorm_pass2(bad, 9.0)
+        with self.assertRaises(cut_short.CutError):
+            cut_short.loudnorm_pass2(dict(ok, input_i="-inf"), 0.2)
 
     def test_a_cut_too_short_to_measure_says_so(self):
         cut_short.check_measured({"input_i": "-23.10"}, 9.0)

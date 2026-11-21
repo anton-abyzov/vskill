@@ -27,6 +27,7 @@ FPS = 30               # the cutter renders every shot at this rate
 AUDIO_RATE = 48000     # and its sound at this one: 1600 samples a frame
 READ_MARGIN = 0.5      # seconds read past a shot's "out"; see read_length
 MAX_FRAMES = FPS * 86400   # a span longer than a day on screen is a typing error
+SOURCE_EDGE = 0.1      # a read that starts this close to its source's end may find no frame
 
 # Layout numbers. Taken from the constants of the cutter that ran
 # (canvas 1080x1920, face 0..640, title bar 640..760, screen 760..1920).
@@ -428,13 +429,15 @@ def shot_video_filter(shot, layout_name, src_w, src_h, facecam=None, layout=DEFA
 def shot_audio_filter(shot):
     """ffmpeg audio part for one shot: 10 ms fades at both cut points. Output label [a2].
     A shot with "frames" is padded or trimmed to exactly that many frames of
-    sound, so it is never shorter than its picture."""
+    sound, so it is never shorter than its picture. The sound is cut at the
+    shot's own length first: the input is read past the shot (read_length),
+    and none of that may be heard, however short the shot is."""
     d = shot["out"] - shot["in"]
     sp = shot.get("speed", 1.0)
     fo = max(0, d - 0.012)
     gate = ("agate=threshold=%s:ratio=9:attack=4:release=90:range=0.05," % shot["gate"]) if shot.get("gate") else ""
     pad = "[1:a]" if "a_in" in shot and "g_in" not in shot else "[0:a]"
-    return (pad + "asetpts=PTS-STARTPTS," + gate + "volume=%s,afade=t=in:d=0.01,afade=t=out:st=%.3f:d=0.01" % (shot.get("vol", 1.0), fo)
+    return (pad + "asetpts=PTS-STARTPTS,atrim=end=%.6f," % d + gate + "volume=%s,afade=t=in:d=0.01,afade=t=out:st=%.3f:d=0.01" % (shot.get("vol", 1.0), fo)
             + ("," + tempo_chain(sp) if sp != 1 else "") + _exact_length(shot) + "[a2]")
 
 
@@ -485,8 +488,8 @@ def read_length(shot):
     stream, and not every filter or build passes that on. Reading past the
     end makes the frames after the shot real input, so the picture never
     leans on it. The extra is not used: shot_grid cuts the picture at the
-    frame count, and the sound is silent after its closing fade and cut to
-    length by _exact_length.
+    frame count, and shot_audio_filter cuts the sound at the shot's length
+    before anything else.
     """
     return shot["out"] - shot["in"] + READ_MARGIN
 
@@ -500,7 +503,9 @@ def past_end(shots, lengths):
     "start" and "end" its range in source time and "have" the source's
     length. A shot that ends past the source still renders to its planned
     length, on a held last frame and silence, so it has to be reported. One
-    that starts there has nothing to show at all ("nothing" is True). Pure.
+    that starts there, or within SOURCE_EDGE of the end (after the last frame
+    of a source at 15 frames a second), may have no frame to show at all:
+    "nothing" is True, whether or not it also ends past the source. Pure.
     """
     out = []
     for s in shots:
@@ -512,9 +517,9 @@ def past_end(shots, lengths):
             reads.append(("a_in", s.get("a_src", s["src"]), s["a_in"]))
         for field, key, start in reads:
             have = lengths.get(key)
-            if have is not None and start + d > have + 0.05:
+            if have is not None and (start + d > have + 0.05 or start > have - SOURCE_EDGE):
                 out.append({"shot": s, "field": field, "key": key, "start": start, "end": round(start + d, 3),
-                            "have": have, "nothing": start > have - 0.05})
+                            "have": have, "nothing": start > have - SOURCE_EDGE})
     return out
 
 

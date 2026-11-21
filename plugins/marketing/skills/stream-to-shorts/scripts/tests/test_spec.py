@@ -81,6 +81,12 @@ class LoadSpec(unittest.TestCase):
             for bad in values:
                 self.refused("\"%s\"" % key, segments=[dict(ok, **{key: bad})])
         self.refused("variants.b.segments[0]", variants={"b": {"segments": [dict(ok, z=0)]}})
+        for bad in (0, -2.0, "2", True):
+            self.refused("max_zoom", segments=[dict(ok, max_zoom=bad)])
+            self.refused("punch", punch=bad)
+        self.assertEqual(self.load(punch=1.1, segments=[dict(ok, max_zoom=3)])["punch"], 1.1)
+        self.refused("\"in\" must be 0 or more", segments=[{"in": -1, "out": 1}])
+        self.assertEqual(self.load(segments=[{"in": 0, "out": 1}])["segments"][0]["in"], 0)
 
     def test_a_moved_screen_needs_the_stack_layout(self):
         seg = {"in": 1.0, "out": 3.0, "g_in": 40.0}

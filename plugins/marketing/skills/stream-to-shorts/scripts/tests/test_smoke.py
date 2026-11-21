@@ -320,6 +320,43 @@ class FrameGridRender(unittest.TestCase):
         self.assertEqual(sorted(set(got[15:])), list(range(34, 46)))
         self.assertEqual(got, sorted(got))
 
+    def test_hot_sound_and_a_tiny_slowed_shot(self):
+        # 1. A clipped source measures above 0 LUFS; the second loudness pass
+        #    must still run. 2. A shot shorter than its fades, slowed to one
+        #    frame, must not let in the sound that follows it in the source.
+        tmp = tempfile.mkdtemp(prefix="sts-hot-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with open(os.path.join(tmp, "caps.json"), "w") as f:
+            json.dump([{"w": "one", "s": 0.05, "e": 0.3}], f)
+
+        def make(sound):
+            r = subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=4",
+                                "-f", "lavfi", "-i", sound, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                                "-c:a", "pcm_s16le", "-ar", "48000", os.path.join(tmp, "main.mov")],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr[-500:])
+        spec = {"id": "a01-demo", "sources": {"main": "main.mov"}, "src": "main", "layout": "full", "bar": "Hot test",
+                "segments": [{"in": 0.5, "out": 2.5, "still": True}]}
+        make("aevalsrc='clip(1.5*(sin(2*PI*1200*t)+sin(2*PI*2400*t)),-0.98,0.98)':s=48000:c=stereo:d=4")
+        said = self.render(tmp, spec)
+        self.assertIn("LUFS, louder than full scale", said)
+        with open(os.path.join(tmp, "out", "metrics.json")) as f:
+            met = json.load(f)
+        self.assertLessEqual(met["loudness"]["TP"], -0.5, met["loudness"])        # the limiter still holds it
+
+        shutil.rmtree(os.path.join(tmp, "out"))
+        make("aevalsrc='0.9*sin(2*PI*2000*t)*gte(t,1)':s=48000:c=stereo:d=4")     # silent, then loud from 1.0 s
+        spec["segments"] = [{"in": 0.991, "out": 1.0, "speed": 0.25, "still": True},
+                            {"in": 2.0, "out": 3.0, "still": True}]
+        self.render(tmp, spec)
+        base = os.path.join(tmp, "out", "base.nut")
+        self.assertEqual(self.lengths(base), (31, 31 * 1600))
+        pcm = subprocess.run([FFMPEG, "-v", "error", "-i", base, "-ac", "1", "-f", "s16le", "-"], capture_output=True).stdout
+        import array
+        first = array.array("h", pcm[:1600 * 2])
+        self.assertEqual(max(abs(x) for x in first), 0)                           # nothing from after its "out"
+        self.assertGreater(max(abs(x) for x in array.array("h", pcm[1600 * 2 * 5:1600 * 2 * 10])), 10000)
+
     def test_a_shot_past_the_end_of_the_source_is_warned_about(self):
         tmp = tempfile.mkdtemp(prefix="sts-end-")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
@@ -343,6 +380,17 @@ class FrameGridRender(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("starts past the end of source 'main'", r.stderr)
         self.assertFalse(os.path.exists(os.path.join(tmp, "out2", "base.nut")))
+        # After the last frame of a source at 15 frames a second there is no picture either.
+        self.source(tmp, "main.mov", "15", seconds=4)
+        for seg in ({"in": 3.94, "out": 4.5}, {"in": 3.96, "out": 4.0}):
+            spec["segments"][1] = seg
+            with open(spec_path, "w") as f:
+                json.dump(spec, f)
+            r = subprocess.run([sys.executable, SCRIPT, "render", spec_path, "--out", os.path.join(tmp, "out3"),
+                                "--words", os.path.join(tmp, "caps.json"), "--ffmpeg", FFMPEG, "--ffprobe", FFPROBE,
+                                "--transcribe-cmd", "off"], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, seg)
+            self.assertIn("where there may be no frame to show", r.stderr)
 
     def test_wide_compilation_is_on_the_grid_and_fades_out(self):
         tmp = tempfile.mkdtemp(prefix="sts-wide-")

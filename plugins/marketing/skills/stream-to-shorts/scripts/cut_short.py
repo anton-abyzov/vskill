@@ -106,6 +106,7 @@ SEGMENT_NUMBERS = (
     ("vol", lambda v: v >= 0, "a volume factor, 0 or more"),
     ("z", lambda v: v > 0, "a zoom above 0"),
     ("punch", lambda v: v > 0, "a zoom above 0"),
+    ("max_zoom", lambda v: v > 0, "a zoom cap above 0"),
     ("gap", lambda v: v >= 0, "a pause length in seconds, 0 or more"),
     ("face_dy", lambda v: True, "a number of pixels"),
 )
@@ -164,6 +165,8 @@ def load_spec(path):
                 ok = seg["out"] > seg["in"]
             except (KeyError, TypeError, ValueError):
                 raise CutError("%s[%d] needs numeric \"in\" and \"out\"" % (name, i))
+            if seg["in"] < 0:
+                raise CutError("%s[%d]: \"in\" must be 0 or more" % (name, i))
             if not ok:
                 raise CutError("%s[%d]: \"out\" must be after \"in\"" % (name, i))
             sp = seg.get("speed", 1.0)
@@ -180,6 +183,8 @@ def load_spec(path):
     limit = spec.get("shot")
     if limit is not None and (not number(limit) or limit <= 0):
         raise CutError("spec \"shot\" (the longest shot in seconds) must be a number above 0")
+    if "punch" in spec and not (number(spec["punch"]) and spec["punch"] > 0):
+        raise CutError("spec \"punch\" must be a zoom above 0")
     labels = spec.get("labels", [])
     if not isinstance(labels, list):
         raise CutError("spec \"labels\" must be a list: [{\"at\": 1.2, \"dur\": 1.4, \"text\": \"...\"}]")
@@ -336,7 +341,7 @@ def build(spec, shots, outdir, variant, ff, fp, env):
 
 def frame_limit(shot):
     """Output options that stop a shot's picture at its planned frame count.
-    cutplan.shot_video_tail already gives exactly that many frames and
+    cutplan.shot_grid already gives exactly that many frames and
     cutplan.shot_audio_filter the matching sound; this is the second lock."""
     return ["-frames:v", str(shot["frames"])] if "frames" in shot else []
 
@@ -355,7 +360,8 @@ def past_end_warnings(spec, shots, ffprobe):
         if r["field"] != "in":
             where += " (its \"%s\", %.2f-%.2f)" % (r["field"], r["start"], r["end"])
         if r["nothing"]:
-            raise CutError("%s starts past the end of source %r (%.2f s): fix its times" % (where, r["key"], r["have"]))
+            raise CutError("%s starts past the end of source %r (%.2f s), or within %.1f s of it, where there may "
+                           "be no frame to show: fix its times" % (where, r["key"], r["have"], cutplan.SOURCE_EDGE))
         fix = "\"in\" and \"out\"" if r["field"] == "in" else "\"%s\" or its length" % r["field"]
         out.append("WARN %s reads past the end of source %r (%.2f s): it holds the last frame over silence there. "
                    "Fix its %s" % (where, r["key"], r["have"], fix))
@@ -462,6 +468,34 @@ def check_measured(measured, dur):
                        "second of sound that is not silent" % dur)
 
 
+# What the second loudnorm pass accepts for each value of the first.
+LOUDNORM_RANGES = (("input_i", -99.0, 0.0), ("input_tp", -99.0, 99.0), ("input_lra", 0.0, 99.0),
+                   ("input_thresh", -99.0, 0.0), ("target_offset", -99.0, 99.0))
+
+
+def loudnorm_pass2(measured, dur):
+    """The second-pass loudnorm filter from the first pass's measurement.
+
+    The filter refuses a measurement outside its own ranges, and a clipped or
+    over-boosted cut measures above 0 LUFS. Each value is held inside its
+    range, and such a cut gets a WARN: it is still brought down by the pass
+    and the limiter, from a start that is a little too low.
+    """
+    check_measured(measured, dur)
+    vals = []
+    for key, low, high in LOUDNORM_RANGES:
+        try:
+            v = float(measured[key])
+        except (KeyError, TypeError, ValueError):
+            raise CutError("loudnorm first pass gave no %s" % key)
+        vals.append(measured[key] if low <= v <= high else ("%.2f" % min(high, max(low, v))))
+    if float(measured["input_i"]) > 0:
+        print("WARN the cut measures %.1f LUFS, louder than full scale: the source is clipped or \"vol\" is too "
+              "high. Lower \"vol\" and listen to the master" % float(measured["input_i"]))
+    return ("loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s"
+            ":linear=false" % tuple(vals))
+
+
 def label_report(spec, shots, lang=None):
     """The labels as placed, for metrics.json: each with the text that was
     burned (the translation with `lang`), the times it was typed with and the
@@ -518,9 +552,7 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
         j = json.loads(m[m.rfind("{"):m.rfind("}") + 1])
     except ValueError:
         raise CutError("loudnorm first pass gave no measurement")
-    check_measured(j, dur)
-    ln = ("loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=false"
-          % (j["input_i"], j["input_tp"], j["input_lra"], j["input_thresh"], j["target_offset"]))
+    ln = loudnorm_pass2(j, dur)
     out_name = "%s%s%s.mp4" % (spec["id"], tagv, tagl)
     out = os.path.join(outdir, out_name)
     vf = "drawbox=x=0:y=%d:w=%d:h=%d:color=white:t=fill,ass=%s" % (bar_y, lay["width"], lay["bar_h"], ass_name)

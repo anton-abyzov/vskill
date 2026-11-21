@@ -1,0 +1,122 @@
+{
+  "note": "Numbers from the platform reference (references/platform-specs.md), which carries the source links. Tiers: OFF official help page, API developer docs, ADS ads spec, 3P third-party guide, PRAC practitioner advice. Loudness is not re-normalised on export.",
+  "common": {
+    "vcodec": "libx264",
+    "x264_preset": "slow",
+    "profile": "high",
+    "pix_fmt": "yuv420p",
+    "bframes": 2,
+    "gop_seconds": 2,
+    "color": "bt709",
+    "acodec": "aac",
+    "audio_rate": 48000,
+    "audio_channels": 2
+  },
+  "presets": {
+    "P1": {
+      "name": "master vertical",
+      "kind": "video",
+      "width": 1080,
+      "height": 1920,
+      "fps": "source",
+      "level": "4.2",
+      "video": {
+        "30": {"bitrate": "8M", "maxrate": "12M", "bufsize": "16M"},
+        "60": {"bitrate": "10M", "maxrate": "16M", "bufsize": "20M"}
+      },
+      "audio_kbps": 256,
+      "max_seconds": 180,
+      "serves": "TikTok, Instagram Reels, Facebook Reels, YouTube Shorts, Threads, LinkedIn, X Premium",
+      "basis": "YouTube encoding table [OFF] retrieved November 20, 2026; Instagram API 25 Mbps and 300 MB caps [API] retrieved November 21, 2026; 180 s Shorts limit [OFF] retrieved November 20, 2026"
+    },
+    "P2": {
+      "name": "720x1280 fallback",
+      "kind": "video",
+      "width": 720,
+      "height": 1280,
+      "fps": 30,
+      "video": {
+        "any": {"bitrate": "5M", "maxrate": "6M", "bufsize": "10M"}
+      },
+      "audio_kbps": 128,
+      "max_seconds": 140,
+      "serves": "X when the account is not Premium",
+      "basis": "X API 5,000 kbps minimum and 720x1280 recommendation [API] retrieved November 20, 2026; 140 s non-Premium upload limit [OFF] via search snippet, November 20, 2026"
+    },
+    "P3": {
+      "name": "feed 4:5 recrop",
+      "kind": "video",
+      "width": 1080,
+      "height": 1350,
+      "fps": "source",
+      "crop": true,
+      "safe_box_y": [288, 1248],
+      "video": {
+        "any": {"bitrate": "8M", "maxrate": "12M", "bufsize": "16M"}
+      },
+      "audio_kbps": 192,
+      "max_seconds": 180,
+      "max_seconds_x": 140,
+      "serves": "X timeline, LinkedIn main feed, Instagram carousel slide 1, Facebook feed",
+      "basis": "Instagram demotes reels with borders [OFF] May 31, 2023, so crop and never letterbox; 4:5 safe area 14% top, 20% bottom [PRAC] November 20, 2026"
+    },
+    "P4": {
+      "name": "long 16:9",
+      "kind": "video",
+      "width": 1920,
+      "height": 1080,
+      "fps": "source",
+      "video": {
+        "30": {"bitrate": "8M"},
+        "60": {"bitrate": "12M"}
+      },
+      "audio_kbps": 384,
+      "max_seconds": null,
+      "serves": "YouTube long-form compilation, wide demos for X or LinkedIn",
+      "basis": "YouTube encoding table, 8 Mbps at 1080p 24 to 30 fps and 12 Mbps at 48 to 60 fps, AAC 384 kbps [OFF] retrieved November 20, 2026"
+    },
+    "P5": {
+      "name": "size-capped 50 MB",
+      "kind": "capped",
+      "width": 1080,
+      "height": 1920,
+      "fallback": {"width": 720, "height": 1280, "below_kbps": 3000},
+      "fps": "source",
+      "max_fps": 30,
+      "cap_mb": 48,
+      "max_kbps": 8000,
+      "limit_mb": 50,
+      "audio_kbps": 128,
+      "margin": 0.05,
+      "max_seconds": null,
+      "serves": "bot uploads with a 50 MB video limit (Telegram Bot API)",
+      "basis": "Telegram Bot API 50 MB video limit for bots [API], research session November 20 and 21, 2026; 48 MB target leaves room for the container"
+    },
+    "P6": {
+      "name": "size-capped 10 MB teaser",
+      "kind": "capped",
+      "width": 720,
+      "height": 1280,
+      "fps": 30,
+      "cap_mb": 9.5,
+      "max_kbps": 5000,
+      "limit_mb": 10,
+      "audio_kbps": 96,
+      "margin": 0.05,
+      "max_seconds": 30,
+      "trim_to_max": true,
+      "serves": "file uploads with a 10 MB limit (Discord free tier, webhooks)",
+      "basis": "Discord upload limits [OFF]: FAQ updated November 19, 2026 says 20 MB free, Account Caps table updated November 21, 2026 still says 10 MB; bot and webhook limits not verified, so 10 MB"
+    },
+    "C1": {
+      "name": "vertical cover",
+      "kind": "image",
+      "width": 1080,
+      "height": 1920,
+      "limit_mb": 8,
+      "cover_time": 1.0,
+      "serves": "Instagram Reels cover, TikTok cover, Facebook",
+      "basis": "Instagram cover JPEG, 8 MB max, sRGB [API] retrieved November 21, 2026; keep the title in the center 1080x1080 for the 1:1 and 3:4 crops [3P] November 21, 2026"
+    }
+  }
+}

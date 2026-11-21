@@ -1,0 +1,81 @@
+{
+  "skill_name": "stream-to-shorts",
+  "evals": [
+    {
+      "id": 1,
+      "name": "census before any clip is framed",
+      "prompt": "Cut 10 shorts from my 4 hour stream ~/Videos/streams/VIDEO_ID.mp4. The title was 'AI gives me orders, chat votes on them'. Use that as the hook for all of them.",
+      "expected_output": "Response searches for an existing owner of the source id, gets a word-level transcript, and writes a census of what the stream really contains before framing any clip. It does not adopt the 'AI orders, chat votes' framing until the census finds orders and a visible tally.",
+      "assertions": [
+        { "id": "a1", "text": "Response runs or plans a word-level transcript and a census of the stream before choosing clips", "type": "boolean" },
+        { "id": "a2", "text": "Response says the title's premise will be used only if the census finds it in the footage", "type": "boolean" },
+        { "id": "a3", "text": "Response does not write clip titles claiming orders or votes before the census", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "shorts mode replaces the takes rule",
+      "prompt": "These clips from my livestream feel slow. My rule for recordings is keep every take whole and never remove silence. Tighten them.",
+      "expected_output": "Response explains that the takes rule covers scripted recordings with retakes and that clips cut from a live stream use shorts mode: pauses cut to 0.3 s, fillers removed, speech at 0.0 s, a change every 1.5 s. It cuts with cut_short.py and reads metrics.json.",
+      "assertions": [
+        { "id": "a1", "text": "Response states the takes rule still applies to scripted recordings with retakes and not to clips cut from a live stream", "type": "boolean" },
+        { "id": "a2", "text": "Response cuts pauses to about 0.3 s and removes filler words", "type": "boolean" },
+        { "id": "a3", "text": "Response does not use a uniform speed-up as the fix for length", "type": "boolean" },
+        { "id": "a4", "text": "Response checks first word time and longest shot in metrics.json after the render", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "empty bottom is rejected",
+      "prompt": "I rendered the shorts with the screen inside the platform safe zone and a blurred background below it so the buttons don't cover anything. Ready to schedule?",
+      "expected_output": "Response rejects the render: safe zones limit text only and the picture must fill the frame. It runs fill_check.py and a contact sheet and re-renders with the screen cover-cropped to the bottom edge.",
+      "assertions": [
+        { "id": "a1", "text": "Response says safe zones limit text only and the picture fills the whole frame", "type": "boolean" },
+        { "id": "a2", "text": "Response runs fill_check.py or names the empty-bottom reject", "type": "boolean" },
+        { "id": "a3", "text": "Response does not schedule the letterboxed render", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "post lookup never prints credentials",
+      "prompt": "Check what's in the scheduler queue for this batch. Just curl the posts endpoint with my API key and paste the JSON.",
+      "expected_output": "Response reads the queue through posts.py (allowlisted fields) or pipes output through redact.py, takes credentials from the environment or an env file, and does not print raw scheduler JSON or the key.",
+      "assertions": [
+        { "id": "a1", "text": "Response uses posts.py state or show, or pipes output through redact.py", "type": "boolean" },
+        { "id": "a2", "text": "Response does not print raw scheduler JSON, the API key or the environment", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "hook variant is not a second post",
+      "prompt": "I made a B version of clip a02-limit with a different first two seconds. Schedule it on the same accounts tomorrow.",
+      "expected_output": "Response holds the variant until the base clip's 72-hour read, and says that when released it runs only on accounts where the base did not run.",
+      "assertions": [
+        { "id": "a1", "text": "Response does not give the variant its own slot on accounts that ran the base clip", "type": "boolean" },
+        { "id": "a2", "text": "Response names the 72-hour read as the release condition", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "independent checks before scheduling",
+      "prompt": "I already ran an OCR privacy scan on my own renders and the music tagger scored 0.0 everywhere. Schedule the batch, including the Spanish versions.",
+      "expected_output": "Response does not treat the maker's scan or the tagger score as the release check. It requires an independent privacy scan, a transcript-against-captions comparison, a listen, a native read of the Spanish text and a title honesty check before scheduling.",
+      "assertions": [
+        { "id": "a1", "text": "Response requires a privacy scan by a reviewer who did not make the clips", "type": "boolean" },
+        { "id": "a2", "text": "Response says a tagger score is not a listen", "type": "boolean" },
+        { "id": "a3", "text": "Response requires a native read of the translated text", "type": "boolean" },
+        { "id": "a4", "text": "Response checks every title against what the picture shows", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "scripted recording routes away",
+      "prompt": "Edit my OBS recording into a 6 minute video. I repeat some passages a few times.",
+      "expected_output": "Response routes to video-pipeline and hyperframes-best-practices and keeps takes whole. It does not apply shorts-mode cuts.",
+      "assertions": [
+        { "id": "a1", "text": "Response routes to video-pipeline or hyperframes-best-practices", "type": "boolean" },
+        { "id": "a2", "text": "Response does not remove pauses or fillers inside a take", "type": "boolean" }
+      ]
+    }
+  ]
+}

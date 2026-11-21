@@ -144,9 +144,12 @@ def is_secret_key(name):
 
 
 def _collapse(value):
+    """An integration object keeps only its id. The id, and a value that is
+    not an object, still go through redaction: a scheduler can answer with a
+    token where an id was expected."""
     if isinstance(value, dict):
-        return {"id": value.get("id"), "redacted": True}
-    return value  # a bare id string stays as it is
+        return {"id": redact(value.get("id")), "redacted": True}
+    return redact(value)  # a bare id string stays as it is unless it reads as a secret
 
 
 def redact(obj):
@@ -157,14 +160,15 @@ def redact(obj):
                     for k, v in obj.items() if isinstance(v, str))
         for k, v in obj.items():
             lk = k.lower() if isinstance(k, str) else k
+            ok = redact_text(k) if isinstance(k, str) else k   # a secret used as a key
             if is_secret_key(k) or (named and lk in _PAIR_VALUE):
-                out[k] = MASK
+                out[ok] = MASK
             elif lk == "integration":
-                out[k] = _collapse(v)
+                out[ok] = _collapse(v)
             elif lk == "integrations" and isinstance(v, list):
-                out[k] = [_collapse(x) for x in v]
+                out[ok] = [_collapse(x) for x in v]
             else:
-                out[k] = redact(v)
+                out[ok] = redact(v)
         return out
     if isinstance(obj, (list, tuple)):
         if len(obj) == 2 and isinstance(obj[0], str) and is_secret_key(obj[0]) \
@@ -198,6 +202,10 @@ _TEXT_RULES = [
     (re.compile(r"\b(?:sk|pk|rk|ghp|gho|ghu|ghs|ghr|github_pat|glpat|xox[abprs]|"
                 r"blt|tok|key|ya29)[\-_.][A-Za-z0-9_\-.+/=]{16,}"), MASK),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), MASK),
+    # \"name\": \"value\": JSON inside a JSON string, quotes escaped once or more.
+    # The value runs to the next escaped quote, or to the end when it was cut off.
+    (re.compile(r"(?is)(\\{1,8}[\"'])(" + _NAMES + r")(\\{1,8}[\"']\s*[:=]\s*\\{1,8}[\"'])"
+                r"(?!\[redacted\])(?:(?!\\{1,8}[\"']).)*"), r"\1\2\3" + MASK),
     # name: "value", "name": "value", name='value'
     (re.compile(r"(?i)([\"']?)(" + _NAMES + r")\1(\s*[:=]\s*)\"(?:[^\"\\]|\\.)*\""),
      r'\1\2\1\3"' + MASK + '"'),

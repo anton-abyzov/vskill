@@ -48,7 +48,15 @@ def bar_font_size(text, width=780, char_w=0.52, caps=(74, 46)):
     lines = text.split("\n")
     n = max(len(line) for line in lines)
     cap = caps[0] if len(lines) == 1 else caps[1]
+    if not n:
+        return cap
     return int(min(cap, width / (char_w * n)))
+
+
+def ass_text(s):
+    """Text for a Dialogue line: braces escaped, so "{x}" from a code stream is
+    shown and not read as an override tag; line breaks become \\N."""
+    return str(s).replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
 
 
 def ass_color(c):
@@ -166,7 +174,7 @@ Style: Label,{F},50,&H00FFFFFF,&H00FFFFFF,&H001E1EE6,&H001E1EE6,0,0,0,0,100,100,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """.format(W=W, H=H, F=font, FS=fs_bar)
     ev = ["Dialogue: 5,%s,%s,Bar,,0,0,0,,{\\pos(%d,%d)}" % (ass_time(0), ass_time(9999), CX, bar_y + layout["bar_h"] // 2)
-          + bar.upper().replace("\n", "\\N")]
+          + ass_text(bar.upper())]
     tr = translation(spec, lang) if lang else None
     for i, lb in enumerate(spec.get("labels", [])):
         txt = lb["text"]
@@ -175,12 +183,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             txt = labels.get(str(i), labels.get(lb["text"], txt))
         y = min(layout["label_max_y"], lb.get("y", lab_y))
         ev.append("Dialogue: 4,%s,%s,Label,,0,0,0,,{\\pos(%d,%d)}" % (ass_time(lb["at"]), ass_time(lb["at"] + lb["dur"]), CX, y)
-                  + txt.replace("\n", "\\N"))
+                  + ass_text(txt))
     if tr:
         for t0, t1, txt in tr.get("caps", []):
             txt = "\n".join(textwrap.wrap(txt, TRANSLATION_WRAP))
             ev.append("Dialogue: 3,%s,%s,CapTr,,0,0,0,,{\\pos(%d,%d)}" % (ass_time(t0), ass_time(t1), CX, cap_y)
-                      + txt.replace("\n", "\\N"))
+                      + ass_text(txt))
         return head + "\n".join(ev) + "\n"
     ws = burned_words(spec, words, variant)
     alt = spec.get("alt_words", [])
@@ -195,7 +203,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             act = colors["alt"] if any(a <= w["s"] < b for a, b in alt) else colors["active"]
             txt = []
             for j, x in enumerate(ch):
-                txt.append("{\\c%s}%s" % (act if j == i else WHITE, caption_word(x["w"])))
+                txt.append("{\\c%s}%s" % (act if j == i else WHITE, ass_text(caption_word(x["w"]))))
             ev.append("Dialogue: 3,%s,%s,Cap,,0,0,0,,{\\pos(%d,%d)}" % (ass_time(t0), ass_time(t1), CX, cap_y) + " ".join(txt))
     return head + "\n".join(ev) + "\n"
 

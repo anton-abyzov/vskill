@@ -160,10 +160,23 @@ def clip_verdict(rows, baseline):
     return max(vs, key=lambda v: RANK[v]) if vs else "no read yet"
 
 
-def release_call(variant, base, base_rows, base_verdict, accounts):
+NOT_READ = ("", "no", "n", "false", "0", "pending", "todo", "tbd", "not yet", "-", "none", "n/a")
+
+
+def read_done(value):
+    """True when a "read at 24 h" or "read at 72 h" cell says the read was
+    taken: a date or "yes". An empty cell, "no", "pending" and the like do not."""
+    return str(value or "").strip().lower() not in NOT_READ
+
+
+def release_call(variant, base, base_rows, base_verdict, accounts, read_rows=None):
     """Release a held alternate opening only after the base's 72 hour read,
-    and only when the base is a loser or keep; then only where the base has not run."""
-    if not any((r.get("read at 72 h") or "").strip() for r in base_rows):
+    and only when the base is a loser or keep; then only where the base has not run.
+    base_rows say where the base ran. read_rows are the rows the verdict was
+    read from (one account's, when the caller filtered); the 72 hour read
+    must be on those."""
+    read_rows = base_rows if read_rows is None else read_rows
+    if not any(read_done(r.get("read at 72 h")) for r in read_rows):
         return "hold %s: %s has no 72 hour read yet" % (variant, base)
     if base_verdict not in ("loser", "keep"):
         return "hold %s: %s is a %s, keep the first version" % (variant, base, base_verdict)
@@ -192,16 +205,14 @@ def ab_call(a_row, b_row, min_plays=300, min_diff=8):
 
 def format_review(rows):
     yt = [r for r in rows if is_youtube(r) and num(r.get("views")) is not None]
-    if len(yt) < 10:
-        return None
     vals = [num(r.get("viewed vs swiped (YouTube)")) for r in yt]
     vals = [v for v in vals if v is not None]
-    if not vals:
+    if len(vals) < 10:              # ten reads that carry the number, not ten rows
         return None
     med = statistics.median(vals)
     if med < 60:
-        return "format review: median viewed vs swiped %g over %d YouTube reads: %s" % (med, len(yt), FORMAT_STOP)
-    return "format review: median viewed vs swiped %g over %d YouTube reads: no change" % (med, len(yt))
+        return "format review: median viewed vs swiped %g over %d YouTube reads: %s" % (med, len(vals), FORMAT_STOP)
+    return "format review: median viewed vs swiped %g over %d YouTube reads: no change" % (med, len(vals))
 
 
 def decide(rows, baseline, plan=None, min_plays=300, min_diff=8, account=None):
@@ -233,7 +244,8 @@ def decide(rows, baseline, plan=None, min_plays=300, min_diff=8, account=None):
                 accounts.append(p["account"])
         pairs = [(h["clip"], h["base"]) for h in plan.get("held", [])]
         for v, b in pairs:
-            lines.append(release_call(v, b, all_by_clip.get(b, []), verdicts.get(b, "no read yet"), accounts))
+            lines.append(release_call(v, b, all_by_clip.get(b, []), verdicts.get(b, "no read yet"), accounts,
+                                      read_rows=by_clip.get(b, [])))
         released = sorted({(p["clip"], p["variant_of"]) for p in plan.get("posts", []) if p.get("variant_of")})
         for v, b in pairs + released:
             for rb in by_clip.get(b, []):

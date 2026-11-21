@@ -82,7 +82,18 @@ def tight_spans(seg, words, fillers=DEFAULT_FILLERS):
     ws = [w for w in words
           if w["w"].lower() not in fillers and not any(x <= (w["s"] + w["e"]) / 2 < y for x, y in drops)]
     if not ws:
-        return [(a, b)]
+        # No word left to time the cut by: keep the window, less its dropped
+        # ranges. A drop that covers the window leaves nothing.
+        if not drops:
+            return [(a, b)]
+        out, s = [], a
+        for x, y in sorted(drops):
+            if min(x, b) - s > TIGHT["min_span"]:
+                out.append((round(s, 3), round(min(x, b), 3)))
+            s = max(s, y)
+        if b - s > TIGHT["min_span"]:
+            out.append((round(s, 3), round(b, 3)))
+        return out
     gap = seg.get("gap", TIGHT["gap"])
     groups, cur = [], [ws[0]]
     for w in ws[1:]:
@@ -138,8 +149,19 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
         if src is None:
             raise PlanError("segment at %s has no source: set spec \"src\" or segment \"src\"" % seg.get("in"))
         if seg.get("tight") and words_for is not None:
-            akey = seg.get("a_src", src)
-            spans = tight_spans(seg, words_for(akey, seg["in"], seg["out"]), fillers)
+            # Pauses are cut on the sound the viewer hears (see audio_source).
+            # When that sound comes from another source or time, the words
+            # and "drop" ranges are read in its time, and the spans are then
+            # moved back to picture time.
+            akey, a0 = audio_source(seg, src)
+            shift = seg["in"] - a0
+            if akey != src or shift:
+                aseg = dict(seg)
+                aseg["in"], aseg["out"] = a0, a0 + (seg["out"] - seg["in"])
+                spans = [(round(s + shift, 3), round(e + shift, 3))
+                         for s, e in tight_spans(aseg, words_for(akey, aseg["in"], aseg["out"]), fillers)]
+            else:
+                spans = tight_spans(seg, words_for(src, seg["in"], seg["out"]), fillers)
         else:
             spans = [(seg["in"], seg["out"])]
         for (a, b) in spans:
@@ -159,6 +181,8 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
                     s["z"] = seg["z"]
                 res.append(s)
                 k += 1
+    if not res:
+        raise PlanError("the cut is empty: every segment was dropped")
     return res
 
 
@@ -274,7 +298,7 @@ def shot_windows(shot, layout_name, src_w, src_h, facecam=None, layout=DEFAULT_L
         raise PlanError("stack layout needs a facecam box: set spec \"facecam\": [x, y, w, h] "
                         "(the face area of the stream overlay, in source pixels) or segment \"face\"")
     fx, fy, fw, fh = cover(face_box, W, st["face_h"], src_w=src_w, src_h=src_h)
-    fy = max(0, fy + shot.get("face_dy", 0))
+    fy = int(min(max(0, fy + shot.get("face_dy", 0)), src_h - fh))   # stays inside the source
     return {"layout": "stack", "screen": screen, "face": (fx, fy, fw, fh)}
 
 

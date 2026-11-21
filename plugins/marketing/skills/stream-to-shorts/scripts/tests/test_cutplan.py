@@ -131,7 +131,8 @@ class ExpandShots(unittest.TestCase):
         def words_for(key, a, b):
             calls.append((key, a, b))
             return [w("x", 10.5, 10.8), w("y", 12.0, 12.3)]
-        shots = expand_shots(self.spec(segments=[{"in": 10.0, "out": 13.0, "tight": True, "a_src": "voice"}]), words_for=words_for)
+        seg = {"in": 10.0, "out": 13.0, "tight": True, "a_src": "voice", "a_in": 10.0}
+        shots = expand_shots(self.spec(segments=[seg]), words_for=words_for)
         self.assertEqual(calls, [("voice", 10.0, 13.0)])
         self.assertEqual(len(shots), 2)
         self.assertAlmostEqual(shots[0]["in"], 10.4)
@@ -245,6 +246,80 @@ class Windows(unittest.TestCase):
         self.assertTrue(a.startswith("[1:a]"))
         self.assertIn("afade=t=in:d=0.01", a)
         self.assertIn("afade=t=out:st=0.988:d=0.01", a)
+
+
+class Round3(unittest.TestCase):
+    """Third review round: sound taken from another time, drops that leave no
+    word, a face window pushed out of the frame."""
+
+    def test_tight_with_a_in_reads_the_transcript_in_sound_time(self):
+        asked = []
+
+        def words_for(key, a, b):
+            asked.append((key, a, b))
+            return words_in_window([w("late", 503.0, 503.4), w("words", 503.5, 503.9), w("picture", 103.0, 103.4)], a, b)
+        spec = {"src": "main", "segments": [{"in": 100.0, "out": 110.0, "a_in": 500.0, "a_src": "mic", "tight": True}]}
+        shots = expand_shots(spec, words_for=words_for)
+        self.assertEqual(asked, [("mic", 500.0, 510.0)])
+        self.assertAlmostEqual(shots[0]["in"], 102.9)                 # the word at 503.0 in sound time
+        self.assertAlmostEqual(shots[-1]["out"], 104.05)
+        for s in shots:
+            self.assertAlmostEqual(s["a_in"] - s["in"], 400.0)        # sound and picture stay 400 s apart
+
+    def test_tight_follows_the_sound_the_shot_plays(self):
+        asked = []
+
+        def words_for(key, a, b):
+            asked.append((key, a, b))
+            return []
+        segs = [{"in": 100.0, "out": 104.0, "a_in": 500.0, "a_src": "mic", "g_in": 900.0, "tight": True},  # g_in: sound stays at "in"
+                {"in": 200.0, "out": 204.0, "a_src": "mic", "tight": True},                                # no a_in: a_src is not used
+                {"in": 300.0, "out": 304.0, "a_in": 300.0, "a_src": "mic", "tight": True}]                 # same time, other source
+        expand_shots({"src": "main", "segments": segs}, words_for=words_for)
+        self.assertEqual(asked, [("main", 100.0, 104.0), ("main", 200.0, 204.0), ("mic", 300.0, 304.0)])
+
+    def test_tight_with_a_in_drops_in_sound_time(self):
+        def words_for(key, a, b):
+            return words_in_window([w("keep", 501.0, 501.3), w("bad", 503.0, 503.4), w("fine", 505.0, 505.3)], a, b)
+        spec = {"src": "main", "segments": [{"in": 100.0, "out": 110.0, "a_in": 500.0, "tight": True, "still": True,
+                                             "drop": [[502.5, 504.0]]}]}
+        shots = expand_shots(spec, words_for=words_for)
+        self.assertEqual([(s["in"], s["out"]) for s in shots], [(100.9, 101.45), (104.85, 105.45)])
+
+    def test_tight_without_a_in_is_unchanged(self):
+        def words_for(key, a, b):
+            return words_in_window([w("one", 11.0, 11.3), w("two", 13.0, 13.4)], a, b)
+        seg = {"in": 10.0, "out": 20.0, "tight": True, "still": True}
+        shots = expand_shots({"src": "main", "segments": [seg]}, words_for=words_for)
+        self.assertEqual([(s["in"], s["out"]) for s in shots],
+                         tight_spans(seg, words_for("main", 10.0, 20.0)))
+
+    def test_drop_that_covers_every_word_removes_the_speech(self):
+        seg = {"in": 10.0, "out": 12.0, "tight": True, "drop": [[10.0, 12.0]]}
+        self.assertEqual(tight_spans(seg, [w("oops", 10.5, 10.9), w("again", 11.0, 11.4)]), [])
+
+    def test_drop_inside_a_window_with_no_other_word_keeps_the_rest(self):
+        seg = {"in": 10.0, "out": 12.0, "tight": True, "drop": [[10.5, 11.5]]}
+        self.assertEqual(tight_spans(seg, [w("oops", 10.6, 10.9)]), [(10.0, 10.5), (11.5, 12.0)])
+        self.assertEqual(tight_spans(seg, []), [(10.0, 10.5), (11.5, 12.0)])         # no transcript words at all
+        seg["drop"] = [[9.0, 10.05], [11.95, 13.0]]                                   # slivers under min_span go
+        self.assertEqual(tight_spans(seg, [w("um", 10.6, 10.9)]), [(10.05, 11.95)])
+
+    def test_a_cut_with_nothing_left_is_an_error(self):
+        spec = {"src": "main", "segments": [{"in": 10.0, "out": 12.0, "tight": True, "drop": [[10.0, 12.0]]}]}
+        with self.assertRaises(cutplan.PlanError) as cm:
+            expand_shots(spec, words_for=lambda k, a, b: [w("oops", 10.5, 10.9)])
+        self.assertIn("empty", str(cm.exception))
+
+    def test_face_dy_keeps_the_face_window_inside_the_source(self):
+        for dy in (0, 40, 500, 5000, -40, -5000):
+            win = cutplan.shot_windows({"in": 0, "out": 1, "face_dy": dy}, "stack", 1920, 1080, FACE)
+            fx, fy, fw, fh = win["face"]
+            self.assertGreaterEqual(fy, 0, dy)
+            self.assertLessEqual(fy + fh, 1080, dy)
+        low = cutplan.shot_windows({"in": 0, "out": 1}, "stack", 1920, 1080, FACE)["face"][1]
+        moved = cutplan.shot_windows({"in": 0, "out": 1, "face_dy": -40}, "stack", 1920, 1080, FACE)["face"][1]
+        self.assertEqual(moved, low - 40)                             # a shift that fits is applied as given
 
 
 if __name__ == "__main__":

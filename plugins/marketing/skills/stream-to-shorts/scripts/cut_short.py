@@ -45,6 +45,9 @@ import captions
 import cutplan
 
 
+NAME_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
 class CutError(Exception):
     pass
 
@@ -96,8 +99,19 @@ def load_spec(path):
         spec[field] = {k: os.path.expanduser(v) for k, v in spec[field].items()}
     if not spec.get("id"):
         raise CutError("spec has no \"id\"")
-    if "bar" not in spec:
-        raise CutError("spec has no \"bar\" (the title bar text)")
+    # These become file names and part of an ffmpeg filter: plain names only.
+    names = [("id", spec["id"])]
+    names += [("variant name", k) for k in spec.get("variants", {})]
+    names += [("language code", k) for k in spec.get("translations", {})]
+    for what, v in names:
+        if not isinstance(v, str) or not NAME_RX.match(v):
+            raise CutError("spec %s %r: use letters, digits, dot, dash and underscore only" % (what, v))
+    bars = [("bar", spec.get("bar"))]
+    bars += [("variants.%s.bar" % k, v["bar"]) for k, v in spec.get("variants", {}).items() if "bar" in v]
+    bars += [("translations.%s.bar" % k, v["bar"]) for k, v in spec.get("translations", {}).items() if "bar" in v]
+    for what, v in bars:
+        if not isinstance(v, str) or not v.strip():
+            raise CutError("spec \"%s\" (the title bar text) is missing or empty" % what)
     groups = [("segments", spec.get("segments"))]
     groups += [("variants.%s.segments" % k, v["segments"]) for k, v in spec.get("variants", {}).items() if "segments" in v]
     for name, segs in groups:
@@ -110,6 +124,9 @@ def load_spec(path):
                 raise CutError("%s[%d] needs numeric \"in\" and \"out\"" % (name, i))
             if not ok:
                 raise CutError("%s[%d]: \"out\" must be after \"in\"" % (name, i))
+            sp = seg.get("speed", 1.0)
+            if isinstance(sp, bool) or not isinstance(sp, (int, float)) or sp <= 0:
+                raise CutError("%s[%d]: \"speed\" must be a number above 0" % (name, i))
     if not spec.get("sources"):
         raise CutError("spec has no \"sources\": {key: path}")
     if "src" not in spec:
@@ -334,7 +351,7 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
     out = os.path.join(outdir, out_name)
     vf = "drawbox=x=0:y=%d:w=%d:h=%d:color=white:t=fill,ass=%s" % (bar_y, lay["width"], lay["bar_h"], ass_name)
     run([ff, "-v", "error", "-y", "-i", os.path.basename(base), "-vf", vf,
-         "-af", "%s,%s,alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.05" % (pre, ln, dur - 0.05),
+         "-af", "%s,%s,alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.05" % (pre, ln, max(0.0, dur - 0.05)),
          "-c:v", "libx264", "-profile:v", "high", "-level", "4.2", "-crf", "17", "-maxrate", "12M", "-bufsize", "24M",
          "-preset", "slow", "-pix_fmt", "yuv420p", "-r", "30", "-g", "60",
          "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", out_name],

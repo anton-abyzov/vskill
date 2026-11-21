@@ -34,7 +34,6 @@ Environment: STS_FFMPEG and STS_TESSERACT name the binaries when the flags
 are not given.
 """
 import argparse
-import glob
 import json
 import os
 import re
@@ -182,7 +181,12 @@ def scan(video, out, engine="tesseract", fps=4.0, upscale=None, lang="eng",
                               "-vf", "fps=%s" % fps, os.path.join(work, "f%05d.png")])
         if res.returncode != 0:
             raise RuntimeError("ffmpeg could not extract frames from %s" % video)
-        frames = sorted(glob.glob(os.path.join(work, "f*.png")))
+        # listdir, not glob: a "[" or "*" in the folder or file name is a
+        # glob pattern and would match nothing, and the scan would pass empty.
+        frames = sorted(os.path.join(work, f) for f in os.listdir(work)
+                        if f.startswith("f") and f.endswith(".png"))
+        if not frames:
+            raise RuntimeError("ffmpeg extracted 0 frames from %s: nothing was scanned" % video)
         seen = {}
         for i, path in enumerate(frames):
             t = i / float(fps)

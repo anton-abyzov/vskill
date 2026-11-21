@@ -68,10 +68,11 @@ def get_zone(name):
         raise PlanError("unknown time zone: %s" % name)
 
 
-def localize(naive, tz):
+def localize(naive, tz, fold=0):
     """Attach tz to a naive local time; a time inside a spring-forward gap
-    moves to the real time it maps to."""
-    aware = naive.replace(tzinfo=tz, fold=0)
+    moves to the real time it maps to. fold picks the first (0) or second (1)
+    pass of an hour the clock repeats in autumn."""
+    aware = naive.replace(tzinfo=tz, fold=fold)
     return aware.astimezone(UTC).astimezone(tz)
 
 
@@ -103,15 +104,19 @@ def iso_local(d, tz):
     return d.astimezone(tz).isoformat()
 
 
-def in_quiet_hours(d, tz, earliest, latest):
+def in_posting_hours(d, tz, earliest, latest):
+    """True when d is inside the posting hours (minutes of the local day,
+    both ends included, to the second)."""
     loc = d.astimezone(tz)
-    m = loc.hour * 60 + loc.minute
-    return earliest <= m <= latest
+    s = loc.hour * 3600 + loc.minute * 60 + loc.second
+    return earliest * 60 <= s <= latest * 60
 
 
 def window_ok(times, cand, window, cap_max):
     """True when adding cand keeps every rolling window of length `window`
     that contains cand at or under cap_max. Windows are [s, s + window)."""
+    if window <= dt.timedelta(0):
+        return False                    # no window to count in: refuse, never pass
     allt = sorted([x for x in times if abs(x - cand) < window] + [cand])
     for s in allt:
         if s > cand or s <= cand - window:
@@ -182,6 +187,12 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
         for k in c.get("accounts", []):
             if k not in acc_by_key:
                 raise PlanError("cap %s names unknown account %s" % (c.get("name"), k))
+        try:
+            ok = float(c["window_hours"]) > 0 and int(c["max"]) >= 0
+        except (KeyError, TypeError, ValueError):
+            ok = False
+        if not ok:
+            raise PlanError("cap %s needs window_hours above 0 and a whole max of 0 or more" % c.get("name"))
 
     clip_by_id = {}
     for c in clips:
@@ -202,6 +213,7 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
     # Occupied times per account key: busy rows plus planned posts.
     occupied = {k: [] for k in acc_by_key}
     ran = set()  # (clip, account) pairs that already exist or are planned
+    first = {}   # clip id -> its earliest post, queued or planned
     busy_out = []
     for b in busy:
         busy_out.append(b)
@@ -209,9 +221,11 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
         key = key if key in acc_by_key else ref_to_key.get(str(key))
         if key is None:
             continue  # a post on an account outside this plan
-        occupied[key].append(parse_when(b["when"], tz))
+        when = parse_when(b["when"], tz)
+        occupied[key].append(when)
         if b.get("clip"):
             ran.add((b["clip"], key))
+            first[b["clip"]] = min(first.get(b["clip"], when), when)
 
     posts, held, skipped = [], [], []
 
@@ -222,7 +236,7 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
         t = max(want, start_utc)
         limit = t + horizon
         while t <= limit:
-            ok = in_quiet_hours(t, tz, earliest, latest)
+            ok = in_posting_hours(t, tz, earliest, latest)
             if ok and any(abs(t - x) < gap for x in occupied[acc["key"]]):
                 ok = False
             if ok and per_day is not None:
@@ -241,15 +255,20 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
             t += step
         return None
 
-    def wanted(clip_lead_local_naive, acc):
+    def wanted(lead_utc, acc):
         off = float(acc.get("offset_minutes") or 0)
         if acc.get("wave") == "follow":
-            off += opt["follow_offset_minutes"]
+            off += float(opt["follow_offset_minutes"])
+        if not off:
+            return lead_utc
         # Offsets are wall clock: +24 h is the same clock time the next day.
-        return localize(clip_lead_local_naive + dt.timedelta(minutes=float(off)), tz).astimezone(UTC)
+        # The lead's own pass of a repeated autumn hour is kept, and a
+        # positive offset never lands before the lead.
+        loc = lead_utc.astimezone(tz)
+        t = localize(loc.replace(tzinfo=None) + dt.timedelta(minutes=off), tz, loc.fold).astimezone(UTC)
+        return max(t, lead_utc) if off > 0 else t
 
     def place(clip, lead_utc, variant_base=None):
-        lead_naive = lead_utc.astimezone(tz).replace(tzinfo=None)
         for acc in accounts:
             why = _routes(clip, acc)
             if why:
@@ -263,7 +282,7 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
                 skipped.append({"clip": clip["id"], "account": acc["key"],
                                 "reason": "already in the queue or receipts"})
                 continue
-            want = wanted(lead_naive, acc)
+            want = wanted(lead_utc, acc)
             t = find_slot(acc, want)
             if t is None:
                 skipped.append({"clip": clip["id"], "account": acc["key"],
@@ -271,6 +290,7 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
                 continue
             occupied[acc["key"]].append(t)
             ran.add((clip["id"], acc["key"]))
+            first[clip["id"]] = min(first.get(clip["id"], t), t)
             row = {"clip": clip["id"], "account": acc["key"], "platform": acc["platform"],
                    "backend": acc.get("backend"), "lang": acc.get("lang"),
                    "wave": acc.get("wave", "lead"),
@@ -300,16 +320,17 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
         base = c["variant_of"]
         if base not in clip_by_id:
             raise PlanError("clip %s is a variant of unknown clip %s" % (c["id"], base))
-        base_lead = leads.get(base)
-        nb = base_lead + hold if base_lead else None
+        # The hold counts from the base's first post, queued or planned; a
+        # base with neither counts from its lead, or from the plan's start.
+        nb = first.get(base, leads.get(base, start_utc)) + hold
         if not c.get("release"):
             held.append({"clip": c["id"], "base": base,
                          "reason": "alternate opening of %s: hold until the 72 hour read" % base,
-                         "not_before_local": iso_local(nb, tz) if nb else None,
-                         "not_before_utc": iso_utc(nb) if nb else None})
+                         "not_before_local": iso_local(nb, tz),
+                         "not_before_utc": iso_utc(nb)})
             continue
-        lead = leads.get(c["id"]) or nb or start_utc
-        place(c, lead, variant_base=base)
+        # A released variant's own lead cannot pull it inside the hold.
+        place(c, max(leads.get(c["id"], nb), nb), variant_base=base)
 
     posts.sort(key=lambda p: (p["when_utc"], p["account"], p["clip"]))
     caps_out, cap_report = [], {}

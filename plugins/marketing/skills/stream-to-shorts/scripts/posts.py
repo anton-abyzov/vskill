@@ -84,6 +84,8 @@ REDACT_LIMIT = 8192         # characters of free text given to the redaction rul
 # Receipt fields that later runs match on. They are stored exact (see ident()).
 IDENT_FIELDS = ("action", "backend", "host", "post_id", "ref", "clip", "account",
                 "platform", "group", "when_utc")
+BLOTATO_PAGES = 20
+BLOTATO_QUEUED = ("QUEUE", "QUEUED", "SCHEDULED", "PENDING")
 FUTURE_MARGIN = dt.timedelta(minutes=2)
 
 
@@ -472,7 +474,7 @@ class Blotato:
 
     def schedules(self):
         out, cursor = [], None
-        for _ in range(20):
+        for _ in range(BLOTATO_PAGES):
             path = "/schedules" + ("?cursor=" + urllib.parse.quote(str(cursor)) if cursor else "")
             st, text = self.call("GET", path)
             if st != 200:
@@ -486,8 +488,9 @@ class Blotato:
                 cursor = d.get("cursor") or d.get("nextCursor")
             out += items
             if not cursor:
-                break
-        return out
+                return out
+        # A partial list would pass the duplicate, cap and ownership checks.
+        raise Stop("schedules list did not end after %d pages: the queue read is incomplete" % BLOTATO_PAGES)
 
     def queue(self, start=None, end=None):
         return self.schedules()
@@ -497,9 +500,19 @@ class Blotato:
         draft = s.get("draft") or s.get("post") or {}
         content = draft.get("content") or {}
         when = s.get("scheduledAt") or s.get("scheduledTime") or s.get("scheduled_time")
+        # An entry counts as queued unless it says otherwise: when it carries
+        # a status or a public link they are read, so a published or failed
+        # entry is not deleted as if it were waiting.
+        state = s.get("status") or s.get("state")
+        url = s.get("publicUrl") or s.get("postUrl") or s.get("releaseUrl") or s.get("releaseURL")
         return {"id": s.get("id"), "ref": str(draft.get("accountId") or s.get("accountId") or ""),
                 "when": parse_utc(when) if when else None, "text": content.get("text") or "",
-                "state": "QUEUE", "release_url": None, "raw": s}
+                "state": "QUEUE" if state is None else str(state), "release_url": url or None, "raw": s}
+
+    @staticmethod
+    def queued(e):
+        """True when a flat() entry is still waiting to be published."""
+        return not e["release_url"] and e["state"].upper() in BLOTATO_QUEUED
 
 
 # ---------- commands ----------
@@ -589,10 +602,17 @@ def cmd_create(ctx, a):
         ctx.say("no %s rows in the plan" % c.name)
         return
     caps = plan.get("caps", [])
-    done = {(r.get("clip"), r.get("account")) for r in read_receipts(ctx.receipts)
+    recs = read_receipts(ctx.receipts)
+    # A post this batch deleted (confirmed gone) may be created again.
+    deleted = {str(r["post_id"]) for r in recs
+               if r.get("action") == "delete" and r.get("gone") is True
+               and r.get("backend") == c.name and r.get("post_id")
+               and (not r.get("host") or r["host"] == c.host)}
+    done = {(r.get("clip"), r.get("account")) for r in recs
             if r.get("action") == "create" and r.get("backend") == c.name
             and r.get("post_id") and r.get("clip") is not None
-            and (not r.get("host") or r["host"] == c.host)}
+            and (not r.get("host") or r["host"] == c.host)
+            and str(r["post_id"]) not in deleted}
     now = ctx.now()
     start, end = _queue_window(rows, caps)
     live = [c.flat(x) for x in c.queue(start, end)]
@@ -631,13 +651,19 @@ def cmd_create(ctx, a):
         n += 1
         if n > a.only:
             break
-        if not ctx.go:
+        if ctx.go:
+            made = _create_postiz(ctx, r, tag) if c.name == "postiz" else _create_blotato(ctx, r, tag)
+        else:
             ctx.say(tag + " dry-run")
-            times.setdefault(str(r["ref"]), []).append(t)
-            continue
-        made = _create_postiz(ctx, r, tag) if c.name == "postiz" else _create_blotato(ctx, r, tag)
+            made = True
         if made:
+            # Later rows of the same run are checked against this one too: a
+            # plan with the same row twice must not create it twice.
             times.setdefault(str(r["ref"]), []).append(t)
+            done.add((r.get("clip"), r.get("account")))
+            live.append({"id": None, "ref": str(r["ref"]), "when": t,
+                         "text": (r.get("content") or {}).get("text") or "",
+                         "state": "QUEUE", "release_url": None})
 
 
 def _no_id(ctx, r, tag, backend, st):
@@ -823,14 +849,18 @@ def cmd_delete(ctx, a):
             if not found:
                 ctx.say("SKIP %s: not in the queue (published or gone)" % pid)
                 continue
-            date_was = Blotato.flat(found[0])["when"]
+            entry = Blotato.flat(found[0])
+            if not Blotato.queued(entry):
+                ctx.say("SKIP %s: not queued (state %s)" % (pid, scalar(entry["state"])))
+                continue
+            date_was = entry["when"]
             date_was = date_was.strftime("%Y-%m-%dT%H:%M:%SZ") if date_was else None
             ctx.say("%s %s %s" % (pid, date_was, "DELETE" if ctx.go else "dry-run"))
             if not ctx.go:
                 continue
             st, _ = c.call("DELETE", "/schedules/" + path_id(pid))
             gone = not [s for s in c.schedules() if str(s.get("id")) == str(pid)]
-        append_receipt(ctx.receipts, {"action": "delete", "backend": c.name, "post_id": pid,
+        append_receipt(ctx.receipts, {"action": "delete", "backend": c.name, "host": c.host, "post_id": pid,
                                       "why": it.get("why"), "http": st, "gone": gone,
                                       "date_was": date_was})
         ctx.say("  HTTP %s %s" % (st, "gone" if gone else "STILL THERE"))

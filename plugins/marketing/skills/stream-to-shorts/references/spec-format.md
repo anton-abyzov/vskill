@@ -31,12 +31,12 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 
 | Key | Required | Meaning |
 |---|---|---|
-| `id` | yes | Clip id; names the output files |
+| `id` | yes | Clip id; names the output files. Letters, digits, dot, dash and underscore only; the same holds for variant names and language codes |
 | `sources` | yes | `{key: video path}`, relative to the spec file or absolute |
 | `transcripts` | for `tight` | `{key: word JSON}` in source time: Whisper JSON with word timestamps, or a list of `{"w", "s", "e"}` |
 | `src` | when there are several sources | Default source key |
 | `layout` | no | `stack` (default): face, title bar, screen. `full`: one 9:16 picture, for moments with no facecam |
-| `bar` | yes | Title bar text; `\n` makes two lines |
+| `bar` | yes | Title bar text, not empty; `\n` makes two lines |
 | `facecam` | for `stack` | The face area to show across the top, eyes to collar, not the whole overlay box |
 | `facecam_frame` | no | The stream's overlay box, used by `compile_wide.py` to cover it |
 | `segments` | yes | The cut, in order (below) |
@@ -58,9 +58,9 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 |---|---|
 | `in`, `out` | Source window. Required, `out` after `in` |
 | `src` | Source key for this segment |
-| `tight` | Cut pauses over the gap and filler words inside the window, using the transcript |
+| `tight` | Cut pauses over the gap and filler words inside the window, using the transcript of the sound the segment plays. With `a_in` that is the transcript of `a_src` (or of the segment's source), read at `a_in` |
 | `gap` | Pause length that is cut, default 0.3 |
-| `drop` | `[[a, b]]` source ranges to remove (a false start, a garbled line) |
+| `drop` | `[[a, b]]` source ranges to remove (a false start, a garbled line), in the time of the sound: with `a_in`, on the `a_in` clock. Works with `tight` only. A segment whose every part is dropped is left out |
 | `win`, `crop` | Screen window to show. The cutter cover-crops it to the panel's aspect, so the picture always fills the panel |
 | `focus` | `[x, y]` centre of the window when it should not be the centre of `win` |
 | `z`, `punch` | Fixed zoom for this segment; zoom of its punched shots |
@@ -68,9 +68,9 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 | `still` | Keep the segment as one shot (no automatic split) |
 | `face`, `face_dy` | A different face box for this segment; vertical shift of the face window |
 | `layout` | `stack` or `full` for this segment only |
-| `speed` | Playback speed of this segment. Not a fix for length |
+| `speed` | Playback speed of this segment, above 0. Not a fix for length |
 | `vol`, `gate` | Volume factor; noise-gate threshold for this segment's sound |
-| `a_src`, `a_in` | Take the sound from another source or time while the picture stays |
+| `a_src`, `a_in` | Take the sound from another time (`a_in`), and optionally another source (`a_src`), while the picture stays. `a_src` does nothing without `a_in`, and both are ignored on a segment with `g_in` |
 | `g_in` | Take the screen picture from another time while the face and sound stay |
 
 ### What the cutter writes
@@ -112,7 +112,7 @@ A list of accounts, or `{"accounts": [...], "caps": [...]}`. Build it from the r
 | `require_tags`, `exclude_tags` | Tag routing |
 | `settings` | Platform settings copied to each post |
 
-A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window. In the plan each cap also carries `refs`, the scheduler ids of its accounts, which `posts.py` uses to check the cap against the live queue.
+A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window; `window_hours` is above 0 and `max` is a whole number, 0 or more. In the plan each cap also carries `refs`, the scheduler ids of its accounts, which `posts.py` uses to check the cap against the live queue.
 
 ### busy.json
 
@@ -120,11 +120,11 @@ A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window. 
 
 ### plan.json
 
-Written by `plan_schedule.py`: `tz`, `posts`, `held`, `skipped`, `busy`, `caps`, `cap_report`. A post row has `clip`, `account`, `platform`, `backend`, `ref`, `lang`, `wave`, `when_local`, `when_utc`, `wanted_local`, `moved_minutes` (how far the slot moved from the wanted time), `variant_of` for a released variant, the account's `settings`, plus the clip's `content` and `meta`. `held` rows carry `clip`, `base`, `reason`, `not_before_local` and `not_before_utc`. `skipped` rows carry the reason.
+Written by `plan_schedule.py`: `tz`, `posts`, `held`, `skipped`, `busy`, `caps`, `cap_report`. A post row has `clip`, `account`, `platform`, `backend`, `ref`, `lang`, `wave`, `when_local`, `when_utc`, `wanted_local`, `moved_minutes` (how far the slot moved from the wanted time), `variant_of` for a released variant, the account's `settings`, plus the clip's `content` and `meta`. `held` rows carry `clip`, `base`, `reason`, `not_before_local` and `not_before_utc`: 72 hours after the base clip's first post, queued (a `busy` row that names the clip) or planned; for a base with neither, after its lead or the plan's start. A released variant is never placed before that time, whatever its own `lead`. `skipped` rows carry the reason.
 
 ### receipts.jsonl
 
-One JSON line per action, written by `posts.py` after redaction: `create` (`backend`, `host`, `post_id`, `ref`, `clip`, `account`, `platform`, `when_utc`, and `group` or `media`), `create_failed`, `media_failed`, `create_unconfirmed` (a success status with no post id), `update_in_place` and `delete` (`post_id`, `why`). Every line has `action` and `at`. The `create` lines with a post id are the list of posts this batch owns, on that `host`.
+One JSON line per action, written by `posts.py` after redaction: `create` (`backend`, `host`, `post_id`, `ref`, `clip`, `account`, `platform`, `when_utc`, and `group` or `media`), `create_failed`, `media_failed`, `create_unconfirmed` (a success status with no post id), `update_in_place` and `delete` (`post_id`, `why`; a delete also has `host` and `gone`). Every line has `action` and `at`. The `create` lines with a post id are the list of posts this batch owns, on that `host`.
 
 ### changes.json and ids.json
 

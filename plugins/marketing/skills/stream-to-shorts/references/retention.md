@@ -83,14 +83,14 @@ Within 24 h of a clip crossing the winner line:
 ### Hook variants
 
 1. A hook variant (an alternate opening of the same clip) never gets its own slot at schedule time. It is held [C].
-2. The base clip's 72 h read releases or drops the variant. `decide` releases it only when the base is a loser or `keep`; a winner keeps its first version. A released variant goes only to accounts where the base did not run [C]. A variant with the same title bar as the base reads as a repost.
+2. The base clip's 72 h read releases or drops the variant. The read counts when the `read at 72 h` cell holds a date or `yes`; an empty cell, `no` or `pending` is not a read. With `--account` the read must be on that account's row. `decide` releases it only when the base is a loser or `keep`; a winner keeps its first version. A released variant goes only to accounts where the base did not run [C]. A variant with the same title bar as the base reads as a repost.
 3. **A/B sample rule.** Call a winner between two variants only when each has 300 or more plays and the 3 s skip rates differ by 8 points or more [C]. Basis: at a skip rate near 65%, the standard error of the difference at 100 plays per variant is sqrt(2 x 0.65 x 0.35 / 100), about 6.7 points, so the 95% interval is about plus or minus 13 points. At 300 plays it is about plus or minus 7.6 points.
 4. Below that, log "no difference" and keep the base. Pool results by hook type across clips. Never decide a hook type from one or two tests.
 5. A win on one platform is a prior for another, not a result. Read each platform's own numbers.
 
 ### Judging the format
 
-1. **Early stop, after 10 posts** on the main platform: if the median viewed vs swiped is under 60%, stop cutting new clips and rework the opens first [C]. `decide` prints this line once the log has 10 YouTube reads.
+1. **Early stop, after 10 posts** on the main platform: if the median viewed vs swiped is under 60%, stop cutting new clips and rework the opens first [C]. `decide` prints this line once the log has 10 YouTube reads that carry the viewed vs swiped number; rows with that cell empty do not count.
 2. **Verdict on the format, after 20 to 30 clips**, not after one and not at the early stop [V]. The early stop only says the opens need work; whether the format is worth keeping needs the larger sample.
 3. Set expectations from the account's own history (its baseline and its 75th percentile), not from famous reference clips. Viral reposts of famous streamers get their reach from the streamer's name, not from the format [C]. Most clips on a small account land near the baseline; a good first week is a complete log and one winner.
 

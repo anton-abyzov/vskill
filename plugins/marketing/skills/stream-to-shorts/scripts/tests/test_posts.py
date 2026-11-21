@@ -974,5 +974,155 @@ class Flags(Base):
         self.assertEqual(t.calls, [])
 
 
+def simple_plan(rows):
+    out = []
+    for clip, account, ref, when, text in rows:
+        out.append({"clip": clip, "account": account, "platform": "youtube", "backend": "postiz", "ref": ref,
+                    "when_utc": when, "settings": {"__type": "youtube", "type": "public", "tags": []},
+                    "content": {"text": text, "title": "T", "media": {"id": "m", "path": "p"}}})
+    return {"posts": out, "caps": []}
+
+
+class Round3(Base):
+    """Third review round: rows of one run against each other, delete then
+    create, the end of a paged list, and a Blotato entry that is not queued."""
+
+    def postiz(self, live=()):
+        n = {"i": 0}
+
+        def post(p, b):
+            n["i"] += 1
+            return 201, [{"postId": "new%d" % n["i"]}]
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (200, {"posts": list(live)}))
+        return t.on("POST", "/api/public/v1/posts", post)
+
+    DOUBLED = [("a01-demo", "yt-main", "REF_YT", "2026-12-01T15:00:00Z", "first caption"),
+               ("a01-demo", "yt-main", "REF_YT", "2026-12-03T15:00:00Z", "another caption"),     # same clip and account
+               ("a02-limit", "yt-main", "REF_YT", "2026-12-01T15:00:30Z", "second caption"),     # same minute
+               ("a03-demo", "yt-main", "REF_YT", "2026-12-05T15:00:00Z", "<p>first   caption</p>"),     # same text
+               ("a04-demo", "yt-es", "REF_ES", "2026-12-01T15:00:00Z", "first caption")]         # another account
+
+    def test_rows_of_one_run_are_checked_against_each_other(self):
+        t = self.postiz()
+        code = self.run_main(["create", self.write("plan.json", simple_plan(self.DOUBLED)), "--go"], t, env_postiz())
+        self.assertEqual(code, 0, self.err)
+        lines = self.out.splitlines()
+        self.assertIn("created new1", lines[0])
+        self.assertIn("skip: in receipts", lines[1])
+        self.assertIn("skip: already in the queue", lines[2])
+        self.assertIn("skip: already in the queue", lines[3])
+        self.assertIn("created new2", lines[4])
+        self.assertEqual(len(t.writes()), 2)
+
+    def test_dry_run_reports_the_same_skips(self):
+        t = self.postiz()
+        self.assertEqual(self.run_main(["create", self.write("plan.json", simple_plan(self.DOUBLED))],
+                                       t, env_postiz()), 0)
+        self.assertEqual(self.out.count("dry-run"), 2)
+        self.assertEqual(self.out.count("skip:"), 3)
+        self.assertEqual(t.writes(), [])
+
+    def test_a_failed_create_does_not_block_the_same_row_later(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (200, {"posts": []}))
+        t.on("POST", "/api/public/v1/posts", lambda p, b: (400, {"error": "bad"}))
+        self.run_main(["create", self.write("plan.json", simple_plan(self.DOUBLED[:2])), "--go"], t, env_postiz())
+        self.assertEqual(self.out.count("FAILED 400"), 2)
+
+    def recreate(self, delete_rec):
+        self.add_receipt({"action": "create", "backend": "postiz", "host": "postiz.example.invalid",
+                          "post_id": "old", "clip": "a01-demo", "account": "yt-main"})
+        if delete_rec:
+            self.add_receipt(dict({"action": "delete", "backend": "postiz", "post_id": "old"}, **delete_rec))
+        t = self.postiz()
+        self.assertEqual(self.run_main(["create", self.write("plan.json", simple_plan(self.DOUBLED[:1])), "--go"],
+                                       t, env_postiz()), 0, self.err)
+        return t
+
+    def test_a_deleted_post_can_be_created_again(self):
+        t = self.recreate({"gone": True, "host": "postiz.example.invalid"})
+        self.assertIn("created new1", self.out)
+        self.assertEqual(len(t.writes()), 1)
+
+    def test_a_delete_receipt_without_a_host_counts(self):
+        self.assertEqual(len(self.recreate({"gone": True}).writes()), 1)
+
+    def test_an_unconfirmed_or_foreign_delete_does_not_free_the_row(self):
+        for rec in (None, {"gone": False}, {"gone": True, "host": "other.example.invalid"},
+                    {"gone": True, "backend": "blotato"}, {"gone": "yes"}):
+            if os.path.exists(self.receipts):
+                os.remove(self.receipts)
+            t = self.recreate(rec)
+            self.assertIn("skip: in receipts", self.out, rec)
+            self.assertEqual(t.writes(), [], rec)
+
+    def test_delete_then_create_end_to_end(self):
+        self.add_receipt({"action": "create", "backend": "postiz", "host": "postiz.example.invalid",
+                          "post_id": "p1", "clip": "a01-demo", "account": "yt-main"})
+        state = {"deleted": False}
+        t = self.postiz().on("POST", "/api/auth/login", login_ok)
+        t.on("GET", "/api/posts/p1", lambda p, b: (404, "{}") if state["deleted"] else (200, queued_post()))
+        t.on("DELETE", "/api/posts/G0", lambda p, b: (state.update(deleted=True), (200, "{}"))[1])
+        self.assertEqual(self.run_main(["delete", self.write("ids.json", [{"post_id": "p1"}]), "--go"],
+                                       t, env_postiz()), 0, self.err)
+        with open(self.receipts) as f:
+            rec = [json.loads(x) for x in f][-1]
+        self.assertEqual((rec["action"], rec["host"], rec["gone"]), ("delete", "postiz.example.invalid", True))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", simple_plan(self.DOUBLED[:1])), "--go"],
+                                       t, env_postiz()), 0, self.err)
+        self.assertIn("created new1", self.out)
+
+    def endless(self):
+        return FakeTransport(BBASE).on("GET", "/schedules*", lambda p, b: (200, {"items": [
+            {"id": "s%d" % len(p), "scheduledAt": "2026-12-01T15:00:00Z", "draft": {"accountId": "REF_TT"}}],
+            "cursor": "more"}))
+
+    def test_blotato_list_that_never_ends_stops_create(self):
+        plan = {"posts": [{"clip": "a01-demo", "account": "tiktok-main", "platform": "tiktok", "backend": "blotato",
+                           "ref": "REF_TT", "when_utc": "2026-12-02T15:30:00Z", "content": {"text": "caption"}}],
+                "caps": []}
+        t = self.endless()
+        self.assertEqual(self.run_main(["create", self.write("plan.json", plan), "--go"], t,
+                                       env_blotato(), "blotato"), 1)
+        self.assertIn("queue read is incomplete", self.err)
+        self.assertEqual(t.writes(), [])
+        self.assertEqual(len(t.calls), posts.BLOTATO_PAGES)
+
+    def test_blotato_list_that_never_ends_stops_delete(self):
+        self.add_receipt({"action": "create", "backend": "blotato", "post_id": "s1", "clip": "a01-demo",
+                          "account": "tiktok-main"})
+        t = self.endless()
+        self.assertEqual(self.run_main(["delete", self.write("ids.json", [{"post_id": "s1"}]), "--go"], t,
+                                       env_blotato(), "blotato"), 1)
+        self.assertEqual(t.writes(), [])
+
+    def test_blotato_last_page_exactly_at_the_limit_is_complete(self):
+        seen = {"n": 0}
+
+        def page(p, b):
+            seen["n"] += 1
+            return 200, {"items": [], "cursor": None if seen["n"] == posts.BLOTATO_PAGES else "c%d" % seen["n"]}
+        t = FakeTransport(BBASE).on("GET", "/schedules*", page)
+        self.assertEqual(self.run_main(["state"], t, env_blotato(), "blotato"), 0, self.err)
+
+    def test_blotato_entry_that_is_not_queued_is_not_deleted(self):
+        self.add_receipt({"action": "create", "backend": "blotato", "post_id": "s1", "clip": "a01-demo",
+                          "account": "tiktok-main"})
+        for extra in ({"status": "published"}, {"state": "FAILED"}, {"publicUrl": "https://v.example.invalid/1"},
+                      {"status": "scheduled", "postUrl": "https://v.example.invalid/1"}):
+            item = dict({"id": "s1", "scheduledAt": "2026-12-01T15:00:00Z", "draft": {"accountId": "REF_TT"}}, **extra)
+            t = FakeTransport(BBASE).on("GET", "/schedules", lambda p, b, item=item: (200, {"items": [item]}))
+            self.assertEqual(self.run_main(["delete", self.write("ids.json", [{"post_id": "s1"}]), "--go"], t,
+                                           env_blotato(), "blotato"), 0, self.err)
+            self.assertIn("SKIP s1: not queued", self.out, extra)
+            self.assertEqual(t.writes(), [], extra)
+
+    def test_blotato_flat_reads_status_and_defaults_to_queued(self):
+        base = {"id": "s1", "scheduledAt": "2026-12-01T15:00:00Z", "draft": {"accountId": "REF_TT"}}
+        self.assertTrue(posts.Blotato.queued(posts.Blotato.flat(base)))
+        for st in ("scheduled", "QUEUED", "pending", "queue"):
+            self.assertTrue(posts.Blotato.queued(posts.Blotato.flat(dict(base, status=st))), st)
+        self.assertFalse(posts.Blotato.queued(posts.Blotato.flat(dict(base, status="published"))))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -390,5 +390,96 @@ class CLI(unittest.TestCase):
         self.assertIn("unknown time zone", out.stderr)
 
 
+class Round3(unittest.TestCase, Props):
+    """Third review round: the repeated autumn hour, the hold of a variant
+    whose base has no lead, posting hours to the second, cap input."""
+
+    ALLDAY = {"earliest": "00:00", "latest": "23:59"}
+
+    def one(self, lead, offset=0, wave="lead", start="2026-10-31 09:00"):
+        clips = [{"id": "a01-demo", "lead": lead}]
+        accs = [{"key": "yt-main", "platform": "youtube", "wave": wave, "offset_minutes": offset}]
+        return ps.plan(clips, accs, [], TZ, start, self.ALLDAY)["posts"][0]
+
+    def test_lead_in_the_second_pass_of_the_repeated_hour_is_kept(self):
+        # 2026-11-01 06:30Z is 01:30 for the second time that night in New York.
+        p = self.one("2026-11-01T06:30:00Z")
+        self.assertEqual(p["when_utc"], "2026-11-01T06:30:00Z")
+        self.assertEqual(p["moved_minutes"], 0)
+
+    def test_offset_from_the_second_pass_never_lands_before_the_lead(self):
+        self.assertEqual(self.one("2026-11-01T06:30:00Z", offset=10)["when_utc"], "2026-11-01T06:40:00Z")
+        self.assertEqual(self.one("2026-11-01T06:30:00Z", offset=45)["when_utc"], "2026-11-01T07:15:00Z")
+
+    def test_offset_from_the_first_pass_stays_in_the_first_pass(self):
+        self.assertEqual(self.one("2026-11-01T05:30:00Z", offset=10)["when_utc"], "2026-11-01T05:40:00Z")
+
+    def test_follow_wave_from_the_second_pass_is_the_same_clock_time_next_day(self):
+        self.assertEqual(self.one("2026-11-01T06:30:00Z", wave="follow")["when_local"][:16], "2026-11-02T01:30")
+
+    def test_no_planned_post_is_ever_before_its_clip_lead(self):
+        for lead in ("2026-11-01T05:30:00Z", "2026-11-01T06:00:00Z", "2026-11-01T06:59:00Z", "2026-03-08T07:30:00Z"):
+            for off in (0, 1, 29, 60, 61, 1440):
+                p = self.one(lead, offset=off, start="2026-03-01 09:00")
+                self.assertGreaterEqual(utc(p["when_utc"]), utc(lead), (lead, off))
+
+    def test_hold_counts_from_the_start_when_the_base_has_no_lead(self):
+        clips = [{"id": "a02-limit"}, {"id": "a02-limit-b", "variant_of": "a02-limit"}]
+        accs = [{"key": "yt-main", "platform": "youtube"}]
+        r = ps.plan(clips, accs, [], TZ, "2026-12-01 10:00")
+        self.assertEqual(r["posts"][0]["when_utc"], "2026-12-01T15:00:00Z")
+        self.assertEqual(r["held"][0]["not_before_utc"], "2026-12-04T15:00:00Z")
+        self.assertEqual(r["held"][0]["not_before_local"][:16], "2026-12-04T10:00")
+
+    def test_released_variant_of_a_base_without_a_lead_waits_72_hours(self):
+        clips = [{"id": "a02-limit", "tags": ["game"]},
+                 {"id": "a02-limit-b", "variant_of": "a02-limit", "release": True}]
+        accs = [{"key": "yt-main", "platform": "youtube", "exclude_tags": []},
+                {"key": "x-main", "platform": "x", "exclude_tags": ["game"]}]
+        r = ps.plan(clips, accs, [], TZ, "2026-12-01 10:00")
+        v = [p for p in r["posts"] if p["clip"] == "a02-limit-b"]
+        self.assertEqual([p["account"] for p in v], ["x-main"])
+        self.assertEqual(v[0]["when_utc"], "2026-12-04T15:00:00Z")
+
+    def test_released_variant_cannot_set_a_lead_inside_the_hold(self):
+        clips = [{"id": "a02-limit", "tags": ["game"], "lead": "2026-12-01 10:00"},
+                 {"id": "a02-limit-b", "variant_of": "a02-limit", "release": True, "lead": "2026-12-02 12:00"}]
+        accs = [{"key": "yt-main", "platform": "youtube"},
+                {"key": "x-main", "platform": "x", "exclude_tags": ["game"]}]
+        r = ps.plan(clips, accs, [], TZ)
+        v = [p for p in r["posts"] if p["clip"] == "a02-limit-b"][0]
+        self.assertGreaterEqual(utc(v["when_utc"]), utc("2026-12-04T15:00:00Z"))
+        clips[1]["lead"] = "2026-12-06 12:00"                # a later lead of its own is kept
+        v = [p for p in ps.plan(clips, accs, [], TZ)["posts"] if p["clip"] == "a02-limit-b"][0]
+        self.assertEqual(v["when_local"][:16], "2026-12-06T12:00")
+
+    def test_hold_counts_from_the_first_post_already_in_the_queue(self):
+        clips = [{"id": "a02-limit", "lead": "2026-12-01 10:00"},
+                 {"id": "a02-limit-b", "variant_of": "a02-limit"}]
+        accs = [{"key": "yt-main", "platform": "youtube"}]
+        busy = [{"account": "yt-main", "when": "2026-12-02T15:00:00Z", "clip": "a02-limit"}]
+        r = ps.plan(clips, accs, busy, TZ)
+        self.assertEqual(r["posts"], [])
+        self.assertEqual(r["held"][0]["not_before_utc"], "2026-12-05T15:00:00Z")
+
+    def test_posting_hours_count_seconds(self):
+        day = lambda h, m, s: dt.datetime(2026, 12, 1, h, m, s, tzinfo=Z)      # noqa: E731
+        self.assertTrue(ps.in_posting_hours(day(22, 0, 0), Z, 7 * 60, 22 * 60))
+        self.assertFalse(ps.in_posting_hours(day(22, 0, 30), Z, 7 * 60, 22 * 60))
+        self.assertTrue(ps.in_posting_hours(day(7, 0, 0), Z, 7 * 60, 22 * 60))
+        self.assertFalse(ps.in_posting_hours(day(6, 59, 59), Z, 7 * 60, 22 * 60))
+
+    def test_cap_without_a_window_is_refused(self):
+        clips = [{"id": "a01-demo", "lead": "2026-12-01 10:00"}]
+        accs = [{"key": "yt-main", "platform": "youtube"}]
+        for cap in ({"window_hours": 0, "max": 3}, {"window_hours": -1, "max": 3}, {"window_hours": 24, "max": -1},
+                    {"window_hours": 24}, {"max": 3}, {"window_hours": "x", "max": 3}):
+            with self.assertRaises(ps.PlanError, msg=cap):
+                ps.plan(clips, accs, [], TZ, caps=[dict({"name": "c", "accounts": ["yt-main"]}, **cap)])
+        t = utc("2026-12-01T15:00:00Z")
+        self.assertFalse(ps.window_ok([], t, dt.timedelta(0), 0))
+        self.assertFalse(ps.window_ok([], t, dt.timedelta(0), 5))
+
+
 if __name__ == "__main__":
     unittest.main()

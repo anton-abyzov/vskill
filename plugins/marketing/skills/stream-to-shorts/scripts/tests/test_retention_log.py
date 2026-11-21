@@ -270,5 +270,48 @@ class InitAndMerge(unittest.TestCase):
         self.assertIn("baseline-views", err.getvalue())
 
 
+class Round3(unittest.TestCase):
+    """Third review round: what counts as a 72 hour read, and how many reads."""
+
+    ACCS = ["yt-main", "tiktok-main", "x-main"]
+
+    def test_only_a_taken_read_counts(self):
+        for cell in ("", " ", "no", "No", "n", "false", "0", "pending", "not yet", "-", "TBD"):
+            self.assertFalse(rl.read_done(cell), cell)
+            base = [row(read72=cell, views=100)]
+            self.assertIn("no 72 hour read yet", rl.release_call("v", "a01-demo", base, "loser", self.ACCS), cell)
+        for cell in ("yes", "Y", "2026-11-24", "November 24", "done", "x"):
+            self.assertTrue(rl.read_done(cell), cell)
+            base = [row(read72=cell, views=100)]
+            self.assertTrue(rl.release_call("v", "a01-demo", base, "loser", self.ACCS).startswith("release v"), cell)
+
+    def plan(self):
+        return {"posts": [{"clip": "a01-demo", "account": "yt-main"}, {"clip": "a01-demo", "account": "tiktok-main"},
+                          {"clip": "a02-limit", "account": "x-main"}],
+                "held": [{"clip": "a01-demo-b", "base": "a01-demo"}]}
+
+    def test_another_accounts_72_hour_read_does_not_release_this_one(self):
+        rows = [row("a01-demo", "youtube", "yt-main", views=400, vvs=52),
+                row("a01-demo", "tiktok", "tiktok-main", views=9000, read72="yes")]
+        lines = rl.decide(rows, B, self.plan(), account="yt-main")
+        self.assertIn("hold a01-demo-b: a01-demo has no 72 hour read yet", lines)
+        rows[0]["read at 72 h"] = "yes"
+        lines = rl.decide(rows, B, self.plan(), account="yt-main")
+        self.assertIn("release a01-demo-b on x-main (a01-demo is loser after its 72 hour read)", lines)
+
+    def test_without_an_account_any_72_hour_read_counts(self):
+        rows = [row("a01-demo", "youtube", "yt-main", views=400, vvs=62),
+                row("a01-demo", "tiktok", "tiktok-main", views=900, read72="yes")]
+        self.assertTrue(any(l.startswith("release a01-demo-b on x-main") for l in rl.decide(rows, B, self.plan())))
+
+    def test_format_review_needs_ten_reads_that_carry_the_number(self):
+        blank = [row(clip="c%02d" % i, views=500) for i in range(9)]
+        self.assertIsNone(rl.format_review(blank + [row(clip="c09", views=500, vvs=40)]))
+        full = [row(clip="c%02d" % i, views=500, vvs=40) for i in range(10)]
+        self.assertIn("median viewed vs swiped 40 over 10 YouTube reads", rl.format_review(full + blank))
+        self.assertIn(rl.FORMAT_STOP, rl.format_review(full))
+        self.assertIsNone(rl.format_review(full[:9] + blank))
+
+
 if __name__ == "__main__":
     unittest.main()

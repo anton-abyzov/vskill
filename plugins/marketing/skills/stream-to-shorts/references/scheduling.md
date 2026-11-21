@@ -97,7 +97,8 @@ python3 <SKILL_DIR>/scripts/posts.py --backend blotato create plan.json --receip
 - Dry run is the default. `--go` creates. `upload` is the exception: it sends the file without `--go`, because an upload posts nothing; put the id and path it prints into the clip's `content.media`.
 - `show`, `update` and `delete` on a Postiz-compatible scheduler use its internal API and need `STS_POSTIZ_EMAIL` and `STS_POSTIZ_PASSWORD` as well.
 - Create only: no post id is ever sent on create. A row that already exists (same account and minute, or same account and the same first 60 characters) is skipped.
-- Rolling caps are checked again against the live queue at create time.
+- Rolling caps are checked again against the live queue at create time. Rows of the same run are checked against each other too, so a plan that lists a row twice creates it once.
+- A Blotato queue is read page by page. If the list has not ended after 20 pages the helper stops: a partial list would pass the duplicate and cap checks.
 - A row whose time is not at least 2 minutes in the future is skipped. A scheduler would publish it at once.
 - A success status with no post id is not a create. The run stops, writes a `create_unconfirmed` line and the outcome is unknown, as below.
 - A server error or a network error stops the run. The outcome is unknown: read the queue and match account and UTC time before any retry. A blind retry is how duplicates happen.
@@ -111,7 +112,8 @@ python3 <SKILL_DIR>/scripts/posts.py --backend postiz update changes.json --rece
 python3 <SKILL_DIR>/scripts/posts.py --backend postiz delete ids.json --receipts receipts.jsonl --go
 ```
 
-- **In place, own posts only.** A re-rendered master, a caption fix or a new time is an update of the queued post, never a delete and a new post. The helper refuses any id that is not in `receipts.jsonl` as created by this batch on this host. It skips any post the scheduler does not report as queued: the state must be `QUEUE`, with no release URL, and the post must be the only one in its group. A post with no state at all is skipped too, so on a scheduler whose post lookup returns no state every update and delete is skipped; the skip line prints the state it saw. A new time that is not in the future is skipped. Other queues on the same accounts stay untouched.
+- **In place, own posts only.** A re-rendered master, a caption fix or a new time is an update of the queued post, never a delete and a new post. The helper refuses any id that is not in `receipts.jsonl` as created by this batch on this host. It skips any post the scheduler does not report as queued: the state must be `QUEUE`, with no release URL, and the post must be the only one in its group. A post with no state at all is skipped too, so on a scheduler whose post lookup returns no state every update and delete is skipped; the skip line prints the state it saw. A new time that is not in the future is skipped. A Blotato entry that carries a status other than queued or scheduled, or a public link, is skipped on delete. Other queues on the same accounts stay untouched.
+- **Delete, then create again.** A row whose post this batch deleted, with the delete confirmed in the receipts, is free again: the next `create` makes it. Until the delete is confirmed the row stays skipped as `in receipts`.
 - Each change carries a `why` and is logged to the receipts. On a Postiz-compatible scheduler the group id changes on every update; the post id does not.
 - A published post is not edited by this helper. Fixing or removing a live post is the account owner's decision.
 

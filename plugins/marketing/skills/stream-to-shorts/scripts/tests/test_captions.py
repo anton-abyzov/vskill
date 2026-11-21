@@ -186,5 +186,39 @@ class LoadWords(unittest.TestCase):
         self.assertEqual(captions.load_words(p1), [{"w": "hi", "s": 0.1, "e": 0.3}])
 
 
+class Round3(unittest.TestCase):
+    """Third review round: an empty title bar, braces in text."""
+
+    def test_empty_bar_has_a_font_size(self):
+        self.assertEqual(bar_font_size(""), 74)
+        self.assertEqual(bar_font_size("\n"), 46)
+
+    def test_ass_text(self):
+        self.assertEqual(captions.ass_text("a {b} c\nd"), "a \\{b\\} c\\Nd")
+
+    def test_braces_are_shown_not_read_as_override_tags(self):
+        spec = dict(SPEC, bar="props {id}\nline", labels=[{"at": 1.0, "dur": 2.0, "text": "{x: 1}"}])
+        spec["translations"] = {"es": {"bar": "el {id}", "caps": [[0, 2.0, "usa {llaves} aqui"]],
+                                       "labels": {"0": "{x: 2}"}}}
+        words = [w("call", 0.0, 0.3), w("f({a})", 0.4, 0.8)]
+        for lang in (None, "es"):
+            text = build_ass(spec, words, None, lang)
+            for line in events(text):
+                body = line.split(",", 9)[9]
+                self.assertTrue(body.startswith("{\\pos("), line)
+                # every other "{" opens a colour tag or is escaped
+                rest = body[body.index("}") + 1:].replace("\\{", "").replace("\\}", "")
+                import re
+                self.assertEqual(re.sub(r"\{\\c&H[0-9A-F]+&\}", "", rest).count("{"), 0, line)
+                self.assertEqual(re.sub(r"\{\\c&H[0-9A-F]+&\}", "", rest).count("}"), 0, line)
+        en = build_ass(spec, words)
+        self.assertIn("PROPS \\{ID\\}\\NLINE", events(en, "Bar")[0])
+        self.assertIn("\\{x: 1\\}", events(en, "Label")[0])
+        self.assertIn("F(\\{A\\})", events(en, "Cap")[-1])
+        es = build_ass(spec, words, None, "es")
+        self.assertIn("usa \\{llaves\\} aqui", events(es, "CapTr")[0])
+        self.assertIn("\\{x: 2\\}", events(es, "Label")[0])
+
+
 if __name__ == "__main__":
     unittest.main()

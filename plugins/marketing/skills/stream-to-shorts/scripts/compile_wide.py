@@ -78,7 +78,7 @@ def wide_windows(shot, layout_name, src_w, src_h, facecam, frame=None, layout=cu
         fx = int(min(max(frame[0], f[0] + f[2] / 2 - fs / 2), frame[0] + frame[2] - fs))
         fy = int(min(max(frame[1], f[1] + f[3] / 2 - fs / 2), frame[1] + frame[3] - fs))
     else:
-        fs = int(min(max(f[2], f[3]), src_h) / 2) * 2
+        fs = int(min(max(f[2], f[3]), src_w, src_h) / 2) * 2
         fx = int(min(max(0, f[0] + f[2] / 2 - fs / 2), src_w - fs))
         fy = int(min(max(0, f[1] + f[3] / 2 - fs / 2), src_h - fs))
     return (x, y, w, h), (fx, fy, fs)

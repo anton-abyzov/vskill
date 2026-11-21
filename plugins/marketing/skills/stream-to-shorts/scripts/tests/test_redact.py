@@ -290,5 +290,64 @@ class CLI(unittest.TestCase):
         self.assertIn("HTTP 401", r.stdout)
 
 
+class Round3(unittest.TestCase):
+    """Third review round: integration values, escaped JSON, secrets as keys."""
+
+    def tearDown(self):
+        redact_mod.clear_known()
+
+    def test_integration_id_is_still_redacted(self):
+        self.assertEqual(redact({"integration": {"id": TOK, "name": "Main"}}),
+                         {"integration": {"id": "[redacted]", "redacted": True}})
+        d = redact({"integration": {"id": {"secret": OPAQUE, "token": OPAQUE, "n": 1}}})
+        self.assertEqual(d["integration"]["id"], {"secret": "[redacted]", "token": "[redacted]", "n": 1})
+        self.assertNotIn(OPAQUE, json.dumps(d))
+
+    def test_integration_that_is_not_an_object_is_redacted(self):
+        d = redact({"integration": "Bearer " + OPAQUE, "integrations": [TOK, {"id": JWT}, "REF_YT"]})
+        self.assertEqual(d["integration"], "Bearer [redacted]")
+        self.assertEqual(d["integrations"], ["[redacted]", {"id": "[redacted]", "redacted": True}, "REF_YT"])
+
+    def test_known_value_under_integration_is_masked(self):
+        redact_mod.add_known([OPAQUE])
+        d = redact({"integration": {"id": OPAQUE}, "integrations": [OPAQUE, {"id": "x" + OPAQUE}]})
+        self.assertNotIn(OPAQUE, json.dumps(d))
+
+    def test_plain_integration_ids_stay_exact(self):
+        ref = "cm4abc123def456ghi789jkl0"
+        self.assertEqual(redact({"integration": {"id": ref, "token": OPAQUE}, "integrations": [{"id": 7}, ref]}),
+                         {"integration": {"id": ref, "redacted": True},
+                          "integrations": [{"id": 7, "redacted": True}, ref]})
+
+    def test_json_inside_a_json_string(self):
+        inner = json.dumps({"apiKey": OPAQUE, "name": "clip", "refresh_token": OPAQUE})
+        once = json.dumps({"error": inner})                 # quotes escaped once
+        twice = json.dumps({"wrapped": once})               # and twice
+        for text in (once, twice):
+            out = redact_text(text)
+            self.assertNotIn(OPAQUE, out, text)
+            self.assertIn("clip", out)
+            self.assertIn("apiKey", out)
+        self.assertNotIn(OPAQUE, redact_text('{\\"password\\": \\"' + OPAQUE))    # cut off mid-value
+        self.assertNotIn(OPAQUE, redact_text("{\\'api_key\\': \\'" + OPAQUE + "\\'}"))
+
+    def test_escaped_quote_rule_is_linear(self):
+        import time
+        n = 60000
+        bodies = ['\\"token\\": \\"' + "\\" * n, ('\\"key\\": \\"' + "a\\") * (n // 12), "\\\"" * (n // 2),
+                  '\\"' + "a_b-" * (n // 4) + '\\": \\"x']
+        t = time.time()
+        for b in bodies:
+            redact_text(b)
+        self.assertLess(time.time() - t, 3.0)
+
+    def test_a_secret_used_as_a_dict_key(self):
+        d = redact({TOK: 1, "Bearer " + OPAQUE: {"n": 2}, "name": "x", 5: "y"})
+        self.assertNotIn(TOK, json.dumps(d))
+        self.assertNotIn(OPAQUE, json.dumps(d))
+        self.assertEqual(d["name"], "x")
+        self.assertEqual(d[5], "y")
+
+
 if __name__ == "__main__":
     unittest.main()

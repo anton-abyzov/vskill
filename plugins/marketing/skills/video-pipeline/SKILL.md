@@ -2,7 +2,7 @@
 name: video-pipeline
 description: "Run a video end to end as one ordered pipeline: intake, measure the footage, cut, assets, graphics, master, deliver. Routes each stage to the skill that owns it (hyperframes and its sub-skills, hyperframes-best-practices, media-use, kie-gemini-omni, social-media-posting), keeps a per-video stage record so work resumes after a dropped session, and ships a script that measures footage or a reference video (shots, pacing, silences, loudness, frames, word timestamps). Use when a request spans several stages ('take this recording to a finished, posted video'), or asks to 'analyze this footage', 'match the pacing of this video' or 'what is my video workflow'. Not for one stage alone: a recut goes to hyperframes-best-practices, a new composition to hyperframes, a motion graphic to motion-graphics, posting to social-media-posting."
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   author: Anton Abyzov
   category: marketing
   tags: video, editing, pipeline, ffmpeg, whisper, hyperframes, pacing, footage-analysis, specwithcode
@@ -27,6 +27,8 @@ Skip a stage the video does not need. Stage 3 never starts before 2 is done, and
 | 7 | Deliver | `social-media-posting` | the file, its preview, the post once approved |
 
 A video with no footage (a launch film, an explainer, a motion graphic) starts at 1, skips 2 and 3, and enters at 5 through `hyperframes`.
+
+The take rules that stage 3 routes to cover scripted recordings with retakes. Clips cut from a live stream or other unscripted footage have no retakes: cut them with `stream-to-shorts`, where pauses and filler words are removed.
 
 `BRIEF.md` belongs to the HyperFrames skills: it has a set format, they treat an existing one as settled, and `hyperframes init` refuses a folder that already has files. So this skill never writes it. Its own notes (length, aspect, destination, pacing targets) go in `.work/targets.md`. When the video will have graphics, let `/hyperframes` create the project folder first, then add `.work/` inside it; the owner copies what it needs from `.work/targets.md` into its brief.
 

@@ -82,6 +82,7 @@ class Base(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
+        posts.clear_known()
 
     def path(self, name):
         return os.path.join(self.d, name)
@@ -739,6 +740,175 @@ class Hardening(Base):
         gets = [p for m, p, _, _ in t.calls if m == "GET"]
         self.assertEqual(gets, ["/api/posts/a%2F..%2Fother"])
         self.assertEqual(t.writes(), [])
+
+
+class Round2(Base):
+    """Second review round."""
+
+    LONG_HOST = "https://postiz-env.eu-central-1.elasticbeanstalk.example.invalid"
+    LONG_CLIP = "stream-2026-11-20-highlight-clip-03-vertical-final-v2"
+
+    def live(self, items):
+        return lambda p, b: (200, {"posts": items})
+
+    def own(self, pid="p1", **extra):
+        self.add_receipt(dict({"action": "create", "backend": "postiz", "post_id": pid, "clip": "a01-demo",
+                               "account": "yt-main"}, **extra))
+
+    def test_long_error_body_does_not_hang(self):
+        import time
+        t0 = time.time()
+        out = posts.safe_body("<html>" + "aZ9" * 20000 + "</html>")
+        self.assertLess(time.time() - t0, 2.0)
+        self.assertLessEqual(len(out), 500)
+
+    def test_secret_at_the_cuts_is_masked(self):
+        for pad in (470, posts.REDACT_LIMIT - 30):
+            body = "y" * pad + ' "accessToken": "' + OPAQUE + '" tail'
+            self.assertNotIn(OPAQUE[:6], posts.safe_body(body, limit=posts.REDACT_LIMIT))
+            self.assertNotIn(OPAQUE[:6], posts.safe_body(body))
+
+    def test_receipt_keeps_host_and_clip_exact_so_ownership_survives(self):
+        env = dict(env_postiz(), STS_POSTIZ_URL=self.LONG_HOST)
+        rows = plan_rows()
+        rows["posts"][0]["clip"] = self.LONG_CLIP
+        plan = self.write("plan.json", rows)
+        t = FakeTransport(self.LONG_HOST).on("GET", "/api/public/v1/posts*", self.live([]))
+        t.on("POST", "/api/public/v1/posts", lambda p, b: (201, [{"postId": "0123456789abcdef" * 3}]))
+        self.assertEqual(self.run_main(["create", plan, "--go", "--only", "1"], t, env), 0, self.err)
+        with open(self.receipts) as f:
+            rec = json.loads(f.readline())
+        self.assertEqual(rec["host"], "postiz-env.eu-central-1.elasticbeanstalk.example.invalid")
+        self.assertEqual(rec["clip"], self.LONG_CLIP)
+        self.assertEqual(rec["post_id"], "0123456789abcdef" * 3)
+        # the rerun knows the row is done and sends nothing
+        t2 = FakeTransport(self.LONG_HOST).on("GET", "/api/public/v1/posts*", self.live([]))
+        self.assertEqual(self.run_main(["create", plan, "--go", "--only", "1"], t2, env), 0, self.err)
+        self.assertIn("skip: in receipts", self.out.splitlines()[0])
+        # and the post is still this batch's own
+        ids = posts.created_ids(posts.read_receipts(self.receipts), "postiz",
+                                "postiz-env.eu-central-1.elasticbeanstalk.example.invalid")
+        self.assertEqual(ids, {"0123456789abcdef" * 3})
+
+    def test_a_secret_never_lands_in_an_exact_receipt_field(self):
+        posts.append_receipt(self.receipts, {"action": "create", "backend": "postiz", "post_id": {"note": OPAQUE},
+                                             "clip": ["x", OPAQUE], "account": "yt-main", "host": "h"})
+        posts.add_known([OPAQUE])
+        posts.append_receipt(self.receipts, {"action": "create", "backend": "postiz", "post_id": "id-" + OPAQUE,
+                                             "clip": "a01-demo", "account": "yt-main", "host": "h"})
+        with open(self.receipts) as f:
+            text = f.read()
+        self.assertNotIn(OPAQUE, text)
+        first = json.loads(text.splitlines()[0])
+        self.assertIsNone(first["post_id"])
+        self.assertIsNone(first["clip"])
+
+    def test_receipt_from_another_host_does_not_mark_a_row_done(self):
+        self.own(host="other.example.invalid")
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", plan_rows()), "--only", "1"],
+                                       t, env_postiz()), 0)
+        self.assertNotIn("skip: in receipts", self.out)
+        self.assertEqual(self.out.count("dry-run"), 1)
+
+    def test_state_is_matched_without_case(self):
+        self.own()
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok)
+        t.on("GET", "/api/posts/p1", lambda p, b: (200, queued_post(state="queue")))
+        self.assertEqual(self.run_main(["update", self.write("c.json", [{"post_id": "p1", "content": "x"}])],
+                                       t, env_postiz()), 0, self.err)
+        self.assertIn("dry-run", self.out)
+        self.assertNotIn("SKIP", self.out)
+
+    def test_nested_values_under_ordinary_names_are_not_printed_or_stored(self):
+        nested = {"note": OPAQUE}          # an ordinary key name: only scalar() stops it
+        post = queued_post()
+        post["group"] = nested
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok).on("GET", "/api/posts/p1", lambda p, b: (200, post))
+        self.assertEqual(self.run_main(["show", "p1"], t, env_postiz()), 0, self.err)
+        self.assertEqual(json.loads(self.out.splitlines()[0]), {"group": None})
+        # upload
+        t = FakeTransport(BASE).on("POST", "/api/public/v1/upload", lambda p, b: (201, {"id": nested, "path": [OPAQUE]}))
+        with open(self.path("m.mp4"), "wb") as f:
+            f.write(b"0")
+        self.assertEqual(self.run_main(["upload", self.path("m.mp4")], t, env_postiz()), 0, self.err)
+        self.assertEqual(json.loads(self.out), {"id": None, "path": None})
+        # update: the dry-run line, the skip line and the receipt
+        self.own()
+        bad_date = queued_post()
+        bad_date["posts"][0]["publishDate"] = nested
+        after = queued_post(group="G1")
+        after["posts"][0]["publishDate"] = nested
+        after["posts"][0]["state"] = nested
+        state = {"n": 0}
+
+        def get(p, b):
+            state["n"] += 1
+            return 200, (bad_date if state["n"] == 1 else after)
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok).on("GET", "/api/posts/p1", get)
+        t.on("POST", "/api/posts", lambda p, b: (201, {"id": "p1"}))
+        self.run_main(["update", self.write("c.json", [{"post_id": "p1", "content": "x"}]), "--go"], t, env_postiz())
+        skipped = queued_post()
+        skipped["posts"][0]["state"] = nested
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok).on("GET", "/api/posts/p1", lambda p, b: (200, skipped))
+        self.run_main(["update", self.write("c.json", [{"post_id": "p1", "content": "x"}]), "--go"], t, env_postiz())
+        self.assertIn("SKIP p1", self.out)
+        self.run_main(["delete", self.write("i.json", [{"post_id": "p1"}]), "--go"], t, env_postiz())
+        self.assertIn("SKIP p1", self.out)
+
+    def test_stop_message_is_redacted(self):
+        rows = plan_rows()
+        rows["posts"][0]["clip"] = "token=" + OPAQUE
+        rows["posts"][0]["content"].pop("text")
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", rows), "--go"], t, env_postiz()), 1)
+        self.assertIn("has no content.text", self.err)
+
+    def test_entry_or_receipt_without_post_id_gives_no_ownership(self):
+        self.add_receipt({"action": "create", "backend": "postiz", "post_id": None, "clip": "a", "account": "b"})
+        self.add_receipt({"action": "create", "backend": "postiz", "clip": "a", "account": "b"})
+        for ids, msg in (([{"post_id": "None"}], "REFUSED None"), ([{"why": "x"}], "REFUSED entry 1: no post_id"),
+                         ([{"post_id": {"a": 1}}], "REFUSED entry 1: no post_id"), ({"post_id": "p1"}, "expected a JSON list")):
+            for cmd in ("delete", "update"):
+                t = FakeTransport(BASE)
+                self.assertEqual(self.run_main([cmd, self.write("i.json", ids), "--go"], t, env_postiz()), 1)
+                self.assertIn(msg, self.err)
+                self.assertEqual(t.calls, [])
+
+    def test_refused_redirect_says_so(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (301, "<html>moved</html>"))
+        self.assertEqual(self.run_main(["state"], t, env_postiz()), 1)
+        self.assertIn("redirect refused: set the final https URL", self.err)
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", lambda p, b: (302, ""))
+        self.assertEqual(self.run_main(["show", "p1"], t, env_postiz()), 1)
+        self.assertIn("login failed: HTTP 302 (redirect refused", self.err)
+
+    def test_delete_skip_says_why(self):
+        self.own()
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok)
+        t.on("GET", "/api/posts/p1", lambda p, b: (200, queued_post(state="PUBLISHED")))
+        self.run_main(["delete", self.write("i.json", [{"post_id": "p1"}]), "--go"], t, env_postiz())
+        self.assertIn("1 in its group, state PUBLISHED", self.out)
+
+    def test_update_date_is_sent_as_utc(self):
+        body = posts.build_update_body(queued_post(), {"post_id": "p1", "date": "2026-12-05 10:00"})
+        self.assertEqual(body["date"], "2026-12-05T10:00:00.000Z")
+        body = posts.build_update_body(queued_post(), {"post_id": "p1", "date": "2026-12-05T10:00:00-05:00"})
+        self.assertEqual(body["date"], "2026-12-05T15:00:00.000Z")
+        self.assertEqual(posts.build_update_body(queued_post(), {"post_id": "p1"})["date"], "2026-12-01T15:00:00.000Z")
+
+    def test_known_values_do_not_leak_between_runs(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        self.run_main(["state"], t, dict(env_postiz(), STS_POSTIZ_API_KEY="firstkey2026"))
+        self.run_main(["state"], t, env_postiz())
+        self.assertEqual(posts.redact_text("date 2026 firstkey2026"), "date 2026 firstkey2026")
+
+    def test_own_key_fragment_echoed_by_the_server_is_masked(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*",
+                                   lambda p, b: (403, "Invalid key provided: %s***" % API_KEY[:8]))
+        self.assertEqual(self.run_main(["state"], t, env_postiz()), 1)
+        self.assertNotIn(API_KEY[:8], self.err)
+        self.assertIn("HTTP 403", self.err)
 
 
 class Upload(Base):

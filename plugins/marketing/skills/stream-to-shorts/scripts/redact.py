@@ -10,6 +10,7 @@ Functions:
                        every "integration" object collapsed to its id
   redact_text(s)       masks credential shapes inside free text (error bodies)
   public_view(post)    only the allowlisted fields of one post, as scalars
+  ident(v)             an id or name kept exact, only registered values masked
   scalar(v)            one printable value: a redacted string, a number, or None
   add_known(values)    exact values to mask wherever they appear (the caller's
                        own key, password and login)
@@ -23,42 +24,109 @@ Usage:
   python3 redact.py < error.txt > safe.txt        # anything else: redact_text()
 """
 import argparse
+import base64
 import copy
 import json
 import os
 import re
 import sys
+import urllib.parse
 
 MASK = "[redacted]"
 
-# A key is a credential when its lower-cased name contains one of these.
+# A key name is compared after lower-casing and dropping spaces, "_" and "-",
+# so "Api Key", "api_key" and "apiKey" are one name.
+# It is a credential when that form contains one of these.
 _CONTAINS = (
     "auth", "token", "secret", "password", "passwd", "passphrase", "pwd",
-    "cookie", "apikey", "api_key", "api-key", "accesskey", "access_key",
-    "access-key", "credential", "session", "bearer", "signature", "private",
-    "jwt",
+    "cookie", "credential", "session", "bearer", "signature", "private", "jwt",
 )
-# Or when it is exactly one of these.
+# Or is exactly one of these.
 _EXACT = ("key", "sig", "pass", "otp", "pin")
+# Or ends in "key" (apikey, accesskey, clientkey, signingkey), except these.
+_KEY_NOT_SECRET = ("publickey", "pubkey", "monkey", "turkey", "hockey", "jockey",
+                   "donkey", "whiskey", "hotkey", "primarykey", "foreignkey",
+                   "sortkey", "partitionkey", "cachekey")
 # "auth" also sits inside these ordinary names.
-_NOT_SECRET = ("author", "authors", "author_name", "authorname", "author_id", "authorid")
+_NOT_SECRET = ("author", "authors", "authorname", "authorid")
 # In a {"name": ..., "value": ...} pair the value belongs to the name.
-_PAIR_NAME = ("name", "header", "field")
-_PAIR_VALUE = ("value", "val", "values")
+_PAIR_NAME = ("name", "header", "field", "key", "k")
+_PAIR_VALUE = ("value", "val", "values", "v")
 
-_known = set()
+_known = set()        # whole values and their encoded forms
+_known_parts = set()  # the start and end of long values
+_known_rx = {}        # compiled matchers, rebuilt when the sets change
+PART = 8              # length of the start and end fragments
+PART_MIN = 20         # only values this long get fragments
 
 
-def add_known(values):
-    """Register exact values to mask everywhere (the caller's own secrets).
+def _variants(v):
+    out = {v, urllib.parse.quote(v, safe=""), urllib.parse.quote_plus(v),
+           json.dumps(v)[1:-1], json.dumps(v, ensure_ascii=False)[1:-1]}
+    b = v.encode("utf-8")
+    out.add(base64.b64encode(b).decode("ascii"))
+    out.add(base64.b64encode(b).decode("ascii").rstrip("="))
+    out.add(base64.urlsafe_b64encode(b).decode("ascii").rstrip("="))
+    return {x for x in out if len(x) >= 4}
+
+
+def add_known(values, parts=False):
+    """Register values to mask everywhere (the caller's own secrets): the
+    value itself in any letter case, URL-encoded, JSON-escaped and base64.
+    With parts, a value of 20 or more characters also gives its first and
+    last 8, because an error message that echoes part of a key is how the
+    source run leaked one. Use parts for random keys only: the start or end
+    of a login or a password made of words would mask ordinary text.
     Values under 4 characters are ignored: masking them would shred the text."""
     for v in values or ():
-        if isinstance(v, str) and len(v.strip()) >= 4:
-            _known.add(v.strip())
+        if not isinstance(v, str) or len(v.strip()) < 4:
+            continue
+        v = v.strip()
+        _known.update(_variants(v))
+        if parts and len(v) >= PART_MIN:
+            _known_parts.update((v[:PART], v[-PART:]))
+    _known_rx.clear()
+
+
+def add_known_pair(user, password):
+    """Register base64 of user:password, the form of a Basic header."""
+    if isinstance(user, str) and isinstance(password, str) and user and password:
+        pair = base64.b64encode(("%s:%s" % (user.strip(), password.strip())).encode("utf-8")).decode("ascii")
+        _known.update((pair, pair.rstrip("=")))
+        _known_rx.clear()
 
 
 def clear_known():
     _known.clear()
+    _known_parts.clear()
+    _known_rx.clear()
+
+
+def _rx(which):
+    if which not in _known_rx:
+        vals = set(_known) | (_known_parts if which == "all" else set())
+        _known_rx[which] = (re.compile("|".join(re.escape(v) for v in sorted(vals, key=len, reverse=True)),
+                                       re.IGNORECASE) if vals else None)
+    return _known_rx[which]
+
+
+def mask_known(s, parts=False):
+    """Mask only the registered values. With parts, their fragments too."""
+    rx = _rx("all" if parts else "whole")
+    return rx.sub(MASK, s) if rx else s
+
+
+def ident(v):
+    """An id, host, clip or account name as it must be stored to be found
+    again: a short plain value with registered secrets masked and no shape
+    rule applied. Anything else becomes None."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str) and len(v) <= 300 and not any(ord(ch) < 32 for ch in v):
+        return mask_known(v)
+    return None
 
 DEFAULT_FIELDS = ("id", "account", "platform", "state", "when", "text",
                   "media", "title", "release_url")
@@ -68,12 +136,12 @@ def is_secret_key(name):
     """True when a dict key names a credential."""
     if not isinstance(name, str):
         return False
-    k = name.strip().lower()
+    k = re.sub(r"[\s_\-]+", "", name.lower())
     if k in _EXACT:
         return True
-    if k in _NOT_SECRET:
+    if k in _NOT_SECRET or k in _KEY_NOT_SECRET:
         return False
-    return any(part in k for part in _CONTAINS)
+    return k.endswith("key") or any(part in k for part in _CONTAINS)
 
 
 def _collapse(value):
@@ -99,19 +167,23 @@ def redact(obj):
             else:
                 out[k] = redact(v)
         return out
-    if isinstance(obj, list):
-        return [redact(x) for x in obj]
-    if isinstance(obj, tuple):
+    if isinstance(obj, (list, tuple)):
+        if len(obj) == 2 and isinstance(obj[0], str) and is_secret_key(obj[0]) \
+                and not isinstance(obj[1], (dict, list, tuple)):
+            return [obj[0], MASK]      # a ["X-Secret", "value"] header pair
         return [redact(x) for x in obj]
     if isinstance(obj, str):
         return redact_text(obj)
     return copy.deepcopy(obj)
 
 
-_NAMES = (r"(?:[A-Za-z0-9_\-]*(?:authorization|token|secret|password|passwd|passphrase|pwd|cookie|"
-          r"api[_\-]?key|access[_\-]?key|credential|session|signature|private|jwt)[A-Za-z0-9_\-]*"
-          r"|(?<![A-Za-z0-9_\-])(?:[A-Za-z0-9]+[_\-])?auth(?![A-Za-z0-9])"
-          r"|(?<![A-Za-z0-9_\-])(?:key|sig|pass|otp|pin|bearer)(?![A-Za-z0-9_\-]))")
+_W = r"(?<![A-Za-z0-9_\-])"          # a name can only start at the start of a word
+_NAMES = (r"(?:" + _W + r"[A-Za-z0-9_\-]*(?:authorization|token|secret|password|passwd|passphrase|pwd|cookie|"
+          r"api[ _\-]?key|access[ _\-]?key|credential|session|signature|private|jwt)[A-Za-z0-9_\-]*"
+          r"|" + _W + r"[A-Za-z0-9]+[_\-]key(?![A-Za-z0-9_\-])"
+          r"|" + _W + r"(?-i:[a-z0-9]+Key)(?![A-Za-z0-9_\-])"
+          r"|" + _W + r"(?:[A-Za-z0-9]+[_\-])?auth(?![A-Za-z0-9])"
+          r"|" + _W + r"(?:key|sig|pass|otp|pin|bearer)(?![A-Za-z0-9_\-]))")
 
 _TEXT_RULES = [
     # Cookie and Authorization headers: the whole value to the end of the line,
@@ -120,8 +192,9 @@ _TEXT_RULES = [
     (re.compile(r"(?i)\b(authorization\s*[:=]\s*)(?![\"'\s])[^\r\n\"']+"), r"\1" + MASK),
     # Bearer <token>
     (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=\-]{4,}"), r"\1 " + MASK),
-    # JWT-like: three base64url parts joined by dots.
-    (re.compile(r"\b[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"), MASK),
+    # JWT: three base64url parts joined by dots, the first starting "eyJ" (a
+    # JSON header). Without that anchor a host name of three long labels matched.
+    (re.compile(_W + r"eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"), MASK),
     # Vendor prefixes followed by a long token.
     (re.compile(r"\b(?:sk|pk|rk|ghp|gho|ghu|ghs|ghr|github_pat|glpat|xox[abprs]|"
                 r"blt|tok|key|ya29)[\-_.][A-Za-z0-9_\-.+/=]{16,}"), MASK),
@@ -145,8 +218,9 @@ _TEXT_RULES = [
     (re.compile(r"(://)[^/\s:@\"']+:[^/\s@\"']+@"), r"\1" + MASK + "@"),
     # Long opaque strings: 40 or more hex characters, or 48 or more base64 characters.
     (re.compile(r"(?<![A-Za-z0-9])[0-9a-fA-F]{40,}(?![A-Za-z0-9])"), MASK),
+    # (not a file name: a run followed by .ext is left alone)
     (re.compile(r"(?<![A-Za-z0-9+/_\-])(?=[A-Za-z0-9+/_\-]*[0-9])(?=[A-Za-z0-9+/_\-]*[A-Za-z])"
-                r"[A-Za-z0-9+/_\-]{48,}={0,2}(?![A-Za-z0-9+/_\-])"), MASK),
+                r"[A-Za-z0-9+/_\-]{48,}={0,2}(?![A-Za-z0-9+/_\-])(?!\.[A-Za-z0-9]{2,4}(?![A-Za-z0-9]))"), MASK),
 ]
 
 
@@ -154,8 +228,7 @@ def redact_text(s):
     """Mask credential shapes inside free text."""
     if not isinstance(s, str):
         s = str(s)
-    for v in sorted(_known, key=len, reverse=True):
-        s = s.replace(v, MASK)
+    s = mask_known(s, parts=True)
     for rx, rep in _TEXT_RULES:
         s = rx.sub(rep, s)
     return s
@@ -258,7 +331,16 @@ def public_view(post, fields=DEFAULT_FIELDS):
         "title": settings.get("title") or post.get("title"),
         "release_url": _first(post, "releaseURL", "release_url", "publicUrl"),
     }
-    return {f: scalar(view[f]) for f in fields if f in view}
+    out = {}
+    for f in fields:
+        if f not in view:
+            continue
+        v = view[f]
+        if f in ("id", "account", "media"):     # must stay usable as an id or a file name
+            out[f] = ident(v.get("id") if isinstance(v, dict) else v)
+        else:
+            out[f] = scalar(v)
+    return out
 
 
 def main(argv=None):

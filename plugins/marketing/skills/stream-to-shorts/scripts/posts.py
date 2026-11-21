@@ -62,7 +62,8 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from plan_schedule import window_ok  # noqa: E402
-from redact import add_known, public_view, redact, redact_text, scalar  # noqa: E402
+from redact import (add_known, add_known_pair, clear_known, ident, public_view,  # noqa: E402
+                    redact, redact_text, scalar)
 
 UTC = dt.timezone.utc
 PUBLIC_UA = "Mozilla/5.0 stream-to-shorts"
@@ -76,8 +77,13 @@ ENV_KEYS = ("STS_POSTIZ_URL", "STS_POSTIZ_API_KEY", "STS_POSTIZ_EMAIL",
             "STS_ALLOW_HTTP")
 SECRET_KEYS = ("STS_POSTIZ_API_KEY", "STS_POSTIZ_EMAIL", "STS_POSTIZ_PASSWORD",
                "STS_BLOTATO_API_KEY")
+API_KEY_KEYS = ("STS_POSTIZ_API_KEY", "STS_BLOTATO_API_KEY")
 URL_KEYS = ("STS_POSTIZ_URL", "STS_BLOTATO_URL")
-BODY_LIMIT = 65536          # error bodies are redacted first and cut afterwards
+BODY_LIMIT = 65536          # bytes of an error body kept by the transport
+REDACT_LIMIT = 8192         # characters of free text given to the redaction rules
+# Receipt fields that later runs match on. They are stored exact (see ident()).
+IDENT_FIELDS = ("action", "backend", "host", "post_id", "ref", "clip", "account",
+                "platform", "group", "when_utc")
 FUTURE_MARGIN = dt.timedelta(minutes=2)
 
 
@@ -148,7 +154,10 @@ def config(env, env_file=None):
     if env_file:
         cfg.update({k: v for k, v in load_env_file(env_file).items() if k in ENV_KEYS and v})
     cfg = {k: v.strip() for k, v in cfg.items() if isinstance(v, str) and v.strip()}
+    clear_known()
     add_known(cfg.get(k) for k in SECRET_KEYS)
+    add_known((cfg.get(k) for k in API_KEY_KEYS), parts=True)
+    add_known_pair(cfg.get("STS_POSTIZ_EMAIL"), cfg.get("STS_POSTIZ_PASSWORD"))
     for k, v in cfg.items():
         if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
             raise Stop("%s has a control character in it" % k)
@@ -203,12 +212,22 @@ def plain(text):
 
 
 def safe_body(text, limit=500):
-    """An error body made safe to print: redacted first, cut afterwards."""
+    """An error body made safe to print. JSON is redacted as an object. Free
+    text is cut to REDACT_LIMIT before the rules run (a value the cut leaves
+    open is masked to the end), and the result is cut to limit afterwards."""
     try:
         s = json.dumps(redact(json.loads(text)), ensure_ascii=False)
     except (ValueError, TypeError):
         s = text if isinstance(text, str) else str(text)
-    return redact_text(s)[:limit]
+    return redact_text(s[:REDACT_LIMIT])[:limit]
+
+
+def http_note(st):
+    """Why a status is not what it seems: a redirect was refused on purpose."""
+    try:
+        return " (redirect refused: set the final https URL)" if 300 <= int(st) < 400 else ""
+    except (TypeError, ValueError):
+        return ""
 
 
 def in_future(when, now):
@@ -282,7 +301,10 @@ def build_update_body(fetched, change):
         if old not in p["content"]:
             raise Stop("%s: expected text not found" % pid)
         text = p["content"].replace(old, new)
-    return {"type": "schedule", "date": change.get("date", p["publishDate"]),
+    date = p["publishDate"]
+    if "date" in change:    # always sent as UTC, never as a time the scheduler could read as local
+        date = parse_utc(change["date"]).strftime("%Y-%m-%dT%H:%M:00.000Z")
+    return {"type": "schedule", "date": date,
             "shortLink": False, "tags": [],
             "posts": [{"integration": {"id": _integration_id(fetched, p)},
                        "group": fetched["group"],
@@ -349,9 +371,16 @@ def created_ids(rows, backend, host=None):
 
 
 def append_receipt(path, rec):
+    """One receipt line. Everything is redacted, then the fields later runs
+    match on are written exact, with only registered secrets masked: a shape
+    rule that rewrote a host or a clip id would lose this batch's ownership."""
     rec = dict(rec, at=dt.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    safe = redact(rec)
+    for k in IDENT_FIELDS:
+        if k in rec:
+            safe[k] = ident(rec[k])
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(redact(rec), ensure_ascii=False) + "\n")
+        f.write(json.dumps(safe, ensure_ascii=False) + "\n")
 
 
 # ---------- clients ----------
@@ -396,7 +425,7 @@ class Postiz:
         st, _ = self.t.request("POST", self.base + "/api/auth/login", h,
                                json.dumps({"email": email, "password": pw, "provider": "LOCAL"}).encode())
         if st not in (200, 201):
-            raise Stop("login failed: HTTP %s" % st)  # never the body
+            raise Stop("login failed: HTTP %s%s" % (st, http_note(st)))  # never the body
         self.logged_in = True
 
     def queue(self, start, end):
@@ -404,7 +433,7 @@ class Postiz:
                                     "endDate": end.strftime("%Y-%m-%dT%H:%M:%S.000Z")})
         st, text = self._public("GET", "/posts?" + q)
         if st != 200:
-            raise Stop("queue read failed: HTTP %s %s" % (st, safe_body(text, 200)))
+            raise Stop("queue read failed: HTTP %s%s %s" % (st, http_note(st), safe_body(text, 200)))
         d = _json(text)
         items = d.get("posts", []) if isinstance(d, dict) else (d or [])
         return items
@@ -447,7 +476,7 @@ class Blotato:
             path = "/schedules" + ("?cursor=" + urllib.parse.quote(str(cursor)) if cursor else "")
             st, text = self.call("GET", path)
             if st != 200:
-                raise Stop("schedules read failed: HTTP %s %s" % (st, safe_body(text, 200)))
+                raise Stop("schedules read failed: HTTP %s%s %s" % (st, http_note(st), safe_body(text, 200)))
             d = _json(text)
             if isinstance(d, list):
                 items, cursor = d, None
@@ -510,7 +539,8 @@ def cmd_show(ctx, a):
     if c.name == "postiz":
         st, d = c.fetch(a.post_id)
         if st != 200 or not isinstance(d, dict):
-            raise Stop("show %s: HTTP %s %s" % (a.post_id, st, safe_body(d if isinstance(d, str) else "", 200)))
+            raise Stop("show %s: HTTP %s%s %s" % (a.post_id, st, http_note(st),
+                                                 safe_body(d if isinstance(d, str) else "", 200)))
         ctx.say(json.dumps({"group": scalar(d.get("group"))}, ensure_ascii=False))
         for p in d.get("posts", []):
             ctx.say_view(p)
@@ -627,7 +657,7 @@ def _create_postiz(ctx, r, tag):
         ctx.say(tag + " FAILED %s %s" % (st, safe_body(text)))
         raise Stop("%s: HTTP %s: %s" % (tag, st, UNKNOWN))
     if st not in (200, 201):
-        ctx.say(tag + " FAILED %s %s" % (st, safe_body(text)))
+        ctx.say(tag + " FAILED %s%s %s" % (st, http_note(st), safe_body(text)))
         append_receipt(ctx.receipts, {"action": "create_failed", "backend": "postiz", "clip": r.get("clip"),
                                       "account": r.get("account"), "http": st, "body": safe_body(text)})
         return False
@@ -696,6 +726,19 @@ def _queued(p, pid):
             and str(p.get("state") or "").upper() == "QUEUE")
 
 
+def _ids(items):
+    """Post ids of a changes or ids file. An entry without one is refused."""
+    if not isinstance(items, list):
+        raise Stop("expected a JSON list of {\"post_id\": ...}")
+    out = []
+    for n, x in enumerate(items, 1):
+        pid = x.get("post_id") if isinstance(x, dict) else None
+        if not isinstance(pid, (str, int)) or isinstance(pid, bool) or pid == "":
+            raise Stop("REFUSED entry %d: no post_id" % n)
+        out.append(pid)
+    return out
+
+
 def _check_own(ids, mine):
     for pid in ids:
         if str(pid) not in mine:
@@ -708,12 +751,12 @@ def cmd_update(ctx, a):
         raise Stop("update is for postiz only")
     with open(a.changes, encoding="utf-8") as f:
         changes = json.load(f)
-    _check_own([x["post_id"] for x in changes], created_ids(read_receipts(ctx.receipts), "postiz", c.host))
+    _check_own(_ids(changes), created_ids(read_receipts(ctx.receipts), "postiz", c.host))
     for ch in changes:
         pid = ch["post_id"]
         st, d = c.fetch(pid)
         if st != 200 or not isinstance(d, dict) or not d.get("posts"):
-            raise Stop("fetch %s: HTTP %s" % (pid, st))
+            raise Stop("fetch %s: HTTP %s%s" % (pid, st, http_note(st)))
         if len(d["posts"]) != 1:
             ctx.say("SKIP %s: its group holds %d posts; an update would rewrite all of them" % (pid, len(d["posts"])))
             continue
@@ -754,14 +797,16 @@ def cmd_delete(ctx, a):
     c = ctx.client
     with open(a.ids, encoding="utf-8") as f:
         items = json.load(f)
-    _check_own([x["post_id"] for x in items], created_ids(read_receipts(ctx.receipts), c.name, c.host))
+    _check_own(_ids(items), created_ids(read_receipts(ctx.receipts), c.name, c.host))
     for it in items:
         pid = it["post_id"]
         if c.name == "postiz":
             st, d = c.fetch(pid)
             ps = d.get("posts", []) if isinstance(d, dict) else []
             if st != 200 or len(ps) != 1 or not _queued(ps[0], pid):
-                ctx.say("SKIP %s: not a single queued post" % pid)
+                state = scalar(ps[0].get("state")) if ps and isinstance(ps[0], dict) else None
+                ctx.say("SKIP %s: not a single queued post (HTTP %s%s, %d in its group, state %s)"
+                        % (pid, st, http_note(st), len(ps), state))
                 continue
             ctx.say("%s %s %s" % (pid, scalar(ps[0].get("publishDate")), "DELETE" if ctx.go else "dry-run"))
             if not ctx.go:

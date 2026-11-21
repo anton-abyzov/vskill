@@ -128,4 +128,4 @@ One JSON line per action, written by `posts.py` after redaction: `create` (`back
 
 ### changes.json and ids.json
 
-`changes.json`: `[{"post_id", "why", "media": {"id", "path"}, "content", "title", "title_max", "replace": [old, new], "date"}]`; everything but `post_id` is optional. `ids.json`: `[{"post_id", "why"}]`. Both are checked against the receipts before anything is sent.
+`changes.json`: `[{"post_id", "why", "media": {"id", "path"}, "content", "title", "title_max", "replace": [old, new], "date"}]`; everything but `post_id` is optional. A `date` with no zone is read as UTC and is always sent as UTC. `ids.json`: `[{"post_id", "why"}]`. Both are checked against the receipts before anything is sent.

@@ -111,7 +111,7 @@ python3 <SKILL_DIR>/scripts/posts.py --backend postiz update changes.json --rece
 python3 <SKILL_DIR>/scripts/posts.py --backend postiz delete ids.json --receipts receipts.jsonl --go
 ```
 
-- **In place, own posts only.** A re-rendered master, a caption fix or a new time is an update of the queued post, never a delete and a new post. The helper refuses any id that is not in `receipts.jsonl` as created by this batch on this host. It skips any post the scheduler does not report as queued: the state must be `QUEUE`, with no release URL, and the post must be the only one in its group. A post with no state at all is skipped too. A new time that is not in the future is skipped. Other queues on the same accounts stay untouched.
+- **In place, own posts only.** A re-rendered master, a caption fix or a new time is an update of the queued post, never a delete and a new post. The helper refuses any id that is not in `receipts.jsonl` as created by this batch on this host. It skips any post the scheduler does not report as queued: the state must be `QUEUE`, with no release URL, and the post must be the only one in its group. A post with no state at all is skipped too, so on a scheduler whose post lookup returns no state every update and delete is skipped; the skip line prints the state it saw. A new time that is not in the future is skipped. Other queues on the same accounts stay untouched.
 - Each change carries a `why` and is logged to the receipts. On a Postiz-compatible scheduler the group id changes on every update; the post id does not.
 - A published post is not edited by this helper. Fixing or removing a live post is the account owner's decision.
 
@@ -120,8 +120,8 @@ python3 <SKILL_DIR>/scripts/posts.py --backend postiz delete ids.json --receipts
 In the source run a post lookup returned the scheduler's whole account object, and part of an API key plus OAuth access and refresh tokens ended up in tool output. Rotating them is the only remedy. The rule since:
 
 - Read posts and queues only through `posts.py`. It prints an allowlist of fields (id, account, platform, state, time, the start of the text, media name, title, URL), each as one plain value, never a nested object, and has no flag for raw output.
-- The scheduler URL must be `https` (plain `http` only for `localhost`, or with `STS_ALLOW_HTTP=1` on a network you trust) and must not carry a login. A redirect is refused, so the key is never sent on to another host.
-- The helper masks its own key, password and login wherever they appear in output, including error messages.
+- The scheduler URL must be `https` (plain `http` only for `localhost`, or with `STS_ALLOW_HTTP=1` on a network you trust) and must not carry a login. A redirect is refused, so the key is never sent on to another host; the error says "redirect refused" and the fix is to set the final URL.
+- The helper masks its own key, password and login wherever they appear in output, including error messages: in any letter case, URL-encoded, JSON-escaped or base64, and for an API key also its first and last 8 characters, because a server that echoes part of a key is how the source run leaked one.
 - `redact.py` masks by key name, by the shape of common tokens and long opaque strings, and by known value. A secret under an ordinary key name with no recognisable shape gets through it. That is why raw scheduler JSON is never printed, filtered or not, when `posts.py` can answer the question.
 - Anything else that touches a scheduler goes through the filter: `some-command | python3 <SKILL_DIR>/scripts/redact.py`.
 - Credentials come from the environment or an env file. Never from the command line, never echoed, never `cat`. Do not print the environment.
@@ -130,4 +130,4 @@ In the source run a post lookup returned the scheduler's whole account object, a
 
 ## Receipts
 
-One JSON line per action, each with `action` and `at`: `{"action": "create", "backend", "host", "post_id", "ref", "clip", "account", "platform", "when_utc"}` for a create, and `{"action": "update_in_place" | "delete", "post_id", "why", ...}` for a change. Failed and unconfirmed creates are logged as `create_failed`, `media_failed` and `create_unconfirmed` and give no ownership. Keep it with the batch; the retention log and every later update read it.
+One JSON line per action, each with `action` and `at`: `{"action": "create", "backend", "host", "post_id", "ref", "clip", "account", "platform", "when_utc"}` for a create, and `{"action": "update_in_place" | "delete", "post_id", "why", ...}` for a change. Failed and unconfirmed creates are logged as `create_failed`, `media_failed` and `create_unconfirmed` and give no ownership. The fields later runs match on (`host`, `post_id`, `clip`, `account`, `ref`, `group`) are stored exact; everything else in a line is redacted. Keep it with the batch; the retention log and every later update read it.

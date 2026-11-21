@@ -195,6 +195,85 @@ class Hardening(unittest.TestCase):
         self.assertEqual(redact_text(text), text)
 
 
+class Round2(unittest.TestCase):
+    """Second review round: speed, key names, encoded known values, exact ids."""
+
+    def tearDown(self):
+        redact_mod.clear_known()
+
+    def test_long_runs_are_scanned_in_linear_time(self):
+        import time
+        n = 60000
+        bodies = ["<html>" + "aZ9" * (n // 3) + "</html>", "a-b_" * (n // 4), "x.y" * (n // 3),
+                  "tok" * (n // 3), ("key" * 5 + "=") * (n // 16), "eyJ" * (n // 3), "ab12" * (n // 4) + ".mp4"]
+        t = time.time()
+        for b in bodies:
+            redact_text(b)
+        self.assertLess(time.time() - t, 3.0)
+
+    def test_key_names_with_spaces_and_affixes(self):
+        d = redact({"Api Key": OPAQUE, "access key": OPAQUE, "clientKey": OPAQUE, "signing_key": OPAQUE,
+                    "X-Auth": OPAQUE, "publicKey": "pk", "monkey": "banana", "sort_key": "name"})
+        self.assertNotIn(OPAQUE, json.dumps(d))
+        self.assertEqual((d["publicKey"], d["monkey"], d["sort_key"]), ("pk", "banana", "name"))
+        for text in ("Api Key: %s" % OPAQUE, "clientKey=%s" % OPAQUE, "signing_key: %s" % OPAQUE):
+            self.assertNotIn(OPAQUE, redact_text(text), text)
+        self.assertEqual(redact_text("monkey: banana"), "monkey: banana")
+
+    def test_pairs_named_by_key_and_list_pairs(self):
+        d = redact({"p": {"key": "X-Custom-Token", "value": OPAQUE}, "q": {"k": "apikey", "v": OPAQUE},
+                    "h": [["X-Secret", OPAQUE], ["Accept", "text/html"]]})
+        self.assertNotIn(OPAQUE, json.dumps(d))
+        self.assertEqual(d["h"][1], ["Accept", "text/html"])
+
+    def test_every_cookie_pair_on_the_line(self):
+        out = redact_text("Cookie: theme=dark; sid=%s; lang=en" % OPAQUE)
+        self.assertNotIn(OPAQUE, out)
+        self.assertNotIn("lang=en", out)
+
+    def test_host_names_and_file_names_are_not_token_shapes(self):
+        for text in ("postiz-env.eu-central-1.elasticbeanstalk.com",
+                     "stream-2026-11-20-highlight-clip-03-vertical-final-v2-take-7.mp4"):
+            self.assertEqual(redact_text(text), text)
+        self.assertEqual(redact_text(JWT), MASK)
+
+    def test_known_value_in_other_forms(self):
+        import base64
+        import urllib.parse
+        key = "Zq8vLm2Xw9pR4tY7uB1n/C3dE"
+        redact_mod.add_known([key], parts=True)
+        redact_mod.add_known(["User" + chr(64) + "Example.invalid"])
+        redact_mod.add_known_pair("user", "pw_word")
+        forms = [key.lower(), urllib.parse.quote(key, safe=""), json.dumps(key)[1:-1],
+                 base64.b64encode(key.encode()).decode(), "Invalid key provided: %s***" % key[:8],
+                 "...%s" % key[-8:], "user" + chr(64) + "example.invalid",
+                 base64.b64encode(b"user:pw_word").decode()]
+        for f in forms:
+            out = redact_text(f)
+            self.assertIn(MASK, out, f)
+            self.assertNotIn(key[:8], out)
+        # a login's own start and end are not fragments: ordinary text survives
+        self.assertEqual(redact_text("cdn.example.invalid/user-guide"), "cdn.example.invalid/user-guide")
+
+    def test_ident_keeps_ids_exact_and_masks_only_known_values(self):
+        hex48 = "0123456789abcdef" * 3
+        host = "postiz-env.eu-central-1.elasticbeanstalk.com"
+        self.assertEqual(redact_mod.ident(hex48), hex48)
+        self.assertEqual(redact_mod.ident(host), host)
+        self.assertEqual(redact_mod.ident(7), 7)
+        for bad in ({"id": 1}, ["a"], True, None, "x" * 301, "a\nb"):
+            self.assertIsNone(redact_mod.ident(bad))
+        redact_mod.add_known([OPAQUE], parts=True)
+        self.assertEqual(redact_mod.ident("id-" + OPAQUE), "id-" + MASK)
+        self.assertEqual(redact_mod.ident(OPAQUE[:8] + "-clip"), OPAQUE[:8] + "-clip")   # fragments do not touch ids
+
+    def test_public_view_keeps_id_and_media_usable(self):
+        hex48 = "0123456789abcdef" * 3
+        v = public_view({"id": hex48, "image": [{"path": "https://cdn.example.invalid/u/%s.mp4?sig=x" % hex48}],
+                         "integration": {"id": hex48, "token": OPAQUE}})
+        self.assertEqual((v["id"], v["account"], v["media"]), (hex48, hex48, hex48 + ".mp4"))
+
+
 class CLI(unittest.TestCase):
     def run_cli(self, data):
         return subprocess.run([sys.executable, SCRIPT], input=data, capture_output=True, text=True)

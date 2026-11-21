@@ -200,12 +200,14 @@ class FrameGridRender(unittest.TestCase):
         self.assertGreaterEqual(len(audio_check.dropouts(rms)), 3)
 
     # Segments from a review probe: lengths between frames, five speeds, a
-    # one-frame shot and a two-frame shot slowed to four.
+    # one-frame shot, a two-frame shot slowed to four, and a one-frame shot
+    # that sits between two frames of a 15 frames a second source.
     AWKWARD = [{"in": 1.0, "out": 2.3337}, {"in": 2.3337, "out": 4.1, "speed": 0.5},
                {"in": 5.013, "out": 6.077, "speed": 1.5}, {"in": 6.077, "out": 7.9123, "speed": 2.0},
                {"in": 9.0, "out": 9.41, "still": True}, {"in": 10.0, "out": 14.0, "speed": 0.75},
                {"in": 16.0171, "out": 18.9999, "speed": 1.1}, {"in": 20.0, "out": 20.0334},
-               {"in": 21.0, "out": 21.07, "speed": 0.5}, {"in": 23.0, "out": 24.6, "speed": 0.9}]
+               {"in": 21.0, "out": 21.07, "speed": 0.5}, {"in": 22.07, "out": 22.105},
+               {"in": 23.0, "out": 24.6, "speed": 0.9}]
 
     def source(self, tmp, name, rate, seconds=10):
         """A moving picture at `rate` frames a second with a steady tone."""
@@ -246,7 +248,7 @@ class FrameGridRender(unittest.TestCase):
                  ("25", [{"in": 2.0, "out": 2.5, "speed": 0.75}, {"in": 6.02, "out": 7.31}], 20 + 38),
                  ("30000/1001", [{"in": 1.0, "out": 3.9, "speed": 1.1}, {"in": 5.0, "out": 5.9, "speed": 0.5}], 79 + 54),
                  ("60", [{"in": 1.0, "out": 1.517}, {"in": 4.0, "out": 4.7, "speed": 2}], 15 + 10),
-                 ("15", self.AWKWARD, 505), ("25", self.AWKWARD, 505), ("30", self.AWKWARD, 505)]
+                 ("15", self.AWKWARD, 506), ("25", self.AWKWARD, 506), ("30", self.AWKWARD, 506)]
         for rate, segments, planned in cases:
             self.source(tmp, "main.mov", rate, seconds=26 if segments is self.AWKWARD else 10)
             shutil.rmtree(os.path.join(tmp, "out"), ignore_errors=True)
@@ -265,6 +267,58 @@ class FrameGridRender(unittest.TestCase):
             master = os.path.join(out, "a01-demo.mp4")
             self.assertEqual(len(small_frames(master)), total, rate)
             self.assertTrue(self.faded(master, total), rate)      # the closing fade runs inside the clip
+
+    def frame_numbers(self, path, x, y):
+        """The source frame number (0 to 49) shown at (x, y) in every frame of a cut."""
+        r = subprocess.run([FFMPEG, "-v", "error", "-i", path, "-vf", "crop=64:64:%d:%d,scale=1:1" % (x, y),
+                            "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True).stdout
+        return [int(round((b * 219 / 255.0 + 16 - 20) / 4.0)) for b in r]
+
+    def numbered_source(self, tmp, rate, seconds=4):
+        """A source whose every frame is one flat grey level that tells its number (0 to 49, then again)."""
+        r = subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i",
+                            "color=c=black:size=1920x1080:rate=%s:duration=%d,geq=lum='20+mod(N,50)*4':cb=128:cr=128"
+                            % (rate, seconds),
+                            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=%d" % seconds,
+                            "-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", "yuv420p",
+                            "-c:a", "pcm_s16le", os.path.join(tmp, "main.mov")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr[-500:])
+
+    def test_every_shot_shows_its_own_source_frames(self):
+        # No frame of a shot is dropped or held in place of the next one: not
+        # the last one before a cut, and not the last frame of the source.
+        tmp = tempfile.mkdtemp(prefix="sts-frames-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with open(os.path.join(tmp, "caps.json"), "w") as f:
+            json.dump([{"w": "one", "s": 0.05, "e": 0.3}], f)
+        base = os.path.join(tmp, "out", "base.nut")
+        spec = {"id": "a01-demo", "sources": {"main": "main.mov"}, "src": "main", "layout": "stack",
+                "bar": "Frames test", "facecam": [1500, 650, 300, 180],
+                "segments": [{"in": 0.0, "out": 1.0, "still": True}, {"in": 1.0, "out": 1.5, "still": True},
+                             {"in": 2.0, "out": 2.3, "speed": 0.5, "still": True},
+                             {"in": 3.5, "out": 4.0, "still": True},                       # ends with the source
+                             {"in": 0.0, "out": 0.5, "g_in": 1.0, "still": True},          # screen from another time
+                             {"in": 1.0, "out": 1.2, "speed": 0.25, "still": True}]}
+        self.numbered_source(tmp, "30")
+        self.assertNotIn("WARN", self.render(tmp, spec))
+        slow = [n for n in range(10, 19) for _ in range(2)]
+        slower = [n for n in range(30, 36) for _ in range(4)]
+        face = list(range(0, 30)) + list(range(30, 45)) + slow + list(range(5, 20)) + list(range(0, 15)) + slower
+        screen = list(range(0, 30)) + list(range(30, 45)) + slow + list(range(5, 20)) + list(range(30, 45)) + slower
+        self.assertEqual(self.frame_numbers(base, 500, 200), face)
+        self.assertEqual(self.frame_numbers(base, 500, 1500), screen)         # face and screen change together
+        # A source at 24 frames a second: every source frame of the shot is
+        # shown, the last one of the source included.
+        self.numbered_source(tmp, "24")
+        shutil.rmtree(os.path.join(tmp, "out"))
+        spec["layout"] = "full"
+        spec["segments"] = [{"in": 0.0, "out": 0.5, "still": True}, {"in": 3.5, "out": 4.0, "still": True}]
+        self.assertNotIn("WARN", self.render(tmp, spec))
+        got = self.frame_numbers(base, 500, 1500)
+        self.assertEqual(len(got), 30)
+        self.assertEqual(sorted(set(got[:15])), list(range(0, 12)))
+        self.assertEqual(sorted(set(got[15:])), list(range(34, 46)))
+        self.assertEqual(got, sorted(got))
 
     def test_a_shot_past_the_end_of_the_source_is_warned_about(self):
         tmp = tempfile.mkdtemp(prefix="sts-end-")

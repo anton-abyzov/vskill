@@ -99,6 +99,18 @@ def preflight_ass(ffmpeg, env=None):
                        "Python package had it in a November 2026 check" % ffmpeg)
 
 
+# Segment fields that are numbers: (field, test of the value, what the message says).
+SEGMENT_NUMBERS = (
+    ("a_in", lambda v: v >= 0, "a source time in seconds, 0 or more"),
+    ("g_in", lambda v: v >= 0, "a source time in seconds, 0 or more"),
+    ("vol", lambda v: v >= 0, "a volume factor, 0 or more"),
+    ("z", lambda v: v > 0, "a zoom above 0"),
+    ("punch", lambda v: v > 0, "a zoom above 0"),
+    ("gap", lambda v: v >= 0, "a pause length in seconds, 0 or more"),
+    ("face_dy", lambda v: True, "a number of pixels"),
+)
+
+
 def number(v):
     """True for a finite int or float; a bool is not a number here."""
     return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
@@ -157,6 +169,14 @@ def load_spec(path):
             sp = seg.get("speed", 1.0)
             if isinstance(sp, bool) or not isinstance(sp, (int, float)) or not math.isfinite(sp) or sp <= 0:
                 raise CutError("%s[%d]: \"speed\" must be a number above 0" % (name, i))
+            for key, ok, rule in SEGMENT_NUMBERS:
+                if key in seg and not (number(seg[key]) and ok(seg[key])):
+                    raise CutError("%s[%d]: \"%s\" must be %s" % (name, i, key, rule))
+            if seg.get("gate") not in (None, False, 0) and (not number(seg["gate"]) or not 0 < seg["gate"] <= 1):
+                raise CutError("%s[%d]: \"gate\" must be a threshold above 0 and up to 1" % (name, i))
+            if "g_in" in seg and seg.get("layout", spec.get("layout", "stack")) == "full":
+                raise CutError("%s[%d]: \"g_in\" moves the screen panel of the stack layout; a \"full\" segment "
+                               "has one picture, so set its \"in\"" % (name, i))
     limit = spec.get("shot")
     if limit is not None and (not number(limit) or limit <= 0):
         raise CutError("spec \"shot\" (the longest shot in seconds) must be a number above 0")
@@ -284,7 +304,7 @@ def build(spec, shots, outdir, variant, ff, fp, env):
             vf = cutplan.shot_video_filter(s, layout_name, sw, sh, spec.get("facecam"))
         except cutplan.PlanError as e:
             raise CutError(str(e))
-        vf += cutplan.shot_video_tail(s)
+        vf += cutplan.SHOT_VIDEO_OUT
         af = cutplan.shot_audio_filter(s)
         ain = []
         if "g_in" in s:
@@ -329,12 +349,16 @@ def past_end_warnings(spec, shots, ffprobe):
         keys.update((s["src"], s.get("a_src", s["src"])))
     lengths = {k: probe_length(ffprobe, spec["sources"][k]) for k in keys if os.path.exists(spec["sources"][k])}
     out = []
-    for s, key, have, nothing in cutplan.past_end(shots, lengths):
-        if nothing:
-            raise CutError("the shot at %.2f-%.2f starts past the end of source %r (%.2f s): fix its times"
-                           % (s["in"], s["out"], key, have))
-        out.append("WARN the shot at %.2f-%.2f reads past the end of source %r (%.2f s): it holds the last frame "
-                   "over silence there. Fix its \"in\" and \"out\"" % (s["in"], s["out"], key, have))
+    for r in cutplan.past_end(shots, lengths):
+        s = r["shot"]
+        where = "the shot at %.2f-%.2f" % (s["in"], s["out"])
+        if r["field"] != "in":
+            where += " (its \"%s\", %.2f-%.2f)" % (r["field"], r["start"], r["end"])
+        if r["nothing"]:
+            raise CutError("%s starts past the end of source %r (%.2f s): fix its times" % (where, r["key"], r["have"]))
+        fix = "\"in\" and \"out\"" if r["field"] == "in" else "\"%s\" or its length" % r["field"]
+        out.append("WARN %s reads past the end of source %r (%.2f s): it holds the last frame over silence there. "
+                   "Fix its %s" % (where, r["key"], r["have"], fix))
     return out
 
 

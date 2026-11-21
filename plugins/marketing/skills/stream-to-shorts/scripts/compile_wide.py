@@ -89,12 +89,13 @@ def wide_video_filter(shot, screen, face, wide=WIDE):
     fx, fy, fs = face
     SW, OW, OH, PW = wide["screen_w"], wide["width"], wide["height"], wide["panel_w"]
     gin = "g_in" in shot
-    return (("[1:v]setpts=PTS-STARTPTS[g]" if gin else "[0:v]setpts=PTS-STARTPTS,split=2[g][f]") + ";"
+    grid = cutplan.shot_grid(shot)      # before crop and scale: see cutplan.shot_grid
+    return ((("[1:v]setpts=PTS-STARTPTS%s[g]" if gin else "[0:v]setpts=PTS-STARTPTS%s,split=2[g][f]") % grid) + ";"
             + "[g]crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos,pad=%d:%d:0:0:white[t];" % (w, h, x, y, SW, OH, OW, OH)
-            + ("[0:v]setpts=PTS-STARTPTS," if gin else "[f]")
+            + (("[0:v]setpts=PTS-STARTPTS%s," % grid) if gin else "[f]")
             + "crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos[ff];" % (fs, fs, fx, fy, PW, PW)
             + "[t][ff]overlay=%d:0,setsar=1[v]" % SW
-            + cutplan.shot_video_tail(shot))
+            + cutplan.SHOT_VIDEO_OUT)
 
 
 def build_wide_ass(marks, words, mark_specs=None, lang=None, wide=WIDE):

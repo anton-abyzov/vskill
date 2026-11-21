@@ -69,10 +69,10 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 | `still` | Keep the segment as one shot (no automatic split) |
 | `face`, `face_dy` | A different face box for this segment; vertical shift of the face window |
 | `layout` | `stack` or `full` for this segment only |
-| `speed` | Playback speed of this segment, above 0. Not a fix for length |
-| `vol`, `gate` | Volume factor; noise-gate threshold for this segment's sound |
+| `speed` | Playback speed of this segment, above 0 (0.25 and 4 work; the sound is retimed in steps outside 0.5 to 100). Not a fix for length |
+| `vol`, `gate` | Volume factor, 0 or more; noise-gate threshold for this segment's sound, above 0 and up to 1 |
 | `a_src`, `a_in` | Take the sound from another time (`a_in`), and optionally another source (`a_src`), while the picture stays. `a_src` does nothing without `a_in`, and both are ignored on a segment with `g_in` |
-| `g_in` | Take the screen picture from another time while the face and sound stay |
+| `g_in` | Take the screen picture from another time while the face and sound stay. Stack layout only: a `full` segment has one picture, and the cutter refuses `g_in` on it |
 
 ### What the cutter writes
 

@@ -162,13 +162,45 @@ class FrameGrid(unittest.TestCase):
         shots = expand_shots(spec(base, {"in": 101.01, "out": 102.5, "a_in": 101.01, "a_src": "mic"}))
         self.assertEqual([s for s in shots if s["in"] >= 100.9][0]["in"], 101.01)       # another recording
 
-    def test_the_picture_is_held_to_the_frame_count(self):
-        tail = cutplan.shot_video_tail({"in": 0, "out": 0.733, "frames": 22})
-        self.assertEqual(tail, ";[v]fps=30:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=22[v2]")
-        tail = cutplan.shot_video_tail({"in": 1.0, "out": 1.7, "frames": 42, "speed": 0.5})
-        self.assertEqual(tail, ";[v]setpts=PTS/0.5,fps=30:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=42[v2]")
-        self.assertEqual(cutplan.shot_video_tail({"in": 0, "out": 1}), ";[v]null[v2]")
-        self.assertEqual(cutplan.shot_video_tail({"in": 0, "out": 1, "speed": 1.1}), ";[v]setpts=PTS/1.1[v2]")
+    def test_the_picture_is_put_on_the_grid_before_crop_and_scale(self):
+        grid = ",fps=30:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=22"
+        self.assertEqual(cutplan.shot_grid({"in": 0, "out": 0.733, "frames": 22}), grid)
+        self.assertEqual(cutplan.shot_grid({"in": 1.0, "out": 1.7, "frames": 42, "speed": 0.5}),
+                         ",setpts=PTS/0.5,fps=30:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=42")
+        self.assertEqual(cutplan.shot_grid({"in": 0, "out": 1}), "")
+        self.assertEqual(cutplan.shot_grid({"in": 0, "out": 1, "speed": 1.1}), ",setpts=PTS/1.1")
+        shot = {"in": 0, "out": 0.733, "frames": 22}
+        full = cutplan.shot_video_filter(shot, "full", 1920, 1080)
+        self.assertTrue(full.startswith("[0:v]setpts=PTS-STARTPTS" + grid + ",crop="), full)
+        stack = cutplan.shot_video_filter(shot, "stack", 1920, 1080, [1500, 650, 300, 180])
+        self.assertTrue(stack.startswith("[0:v]setpts=PTS-STARTPTS" + grid + ",split=2[g][f];"), stack)
+        moved = cutplan.shot_video_filter(dict(shot, g_in=40.0), "stack", 1920, 1080, [1500, 650, 300, 180])
+        self.assertTrue(moved.startswith("[1:v]setpts=PTS-STARTPTS" + grid + "[g];"), moved)
+        self.assertIn("[0:v]setpts=PTS-STARTPTS" + grid + ",crop=", moved)          # both pictures, frame for frame
+        for text in (full, stack, moved):
+            self.assertLess(text.index("trim=end_frame"), text.index("scale="))
+        screen, face = compile_wide.wide_windows(shot, "stack", 1920, 1080, [1500, 650, 300, 180], None)
+        wide = compile_wide.wide_video_filter(shot, screen, face)
+        self.assertTrue(wide.startswith("[0:v]setpts=PTS-STARTPTS" + grid + ",split=2[g][f];"), wide)
+        self.assertTrue(wide.endswith(";[v]null[v2]"), wide)
+        wide = compile_wide.wide_video_filter(dict(shot, g_in=40.0), screen, face)
+        self.assertEqual(wide.count(grid), 2)
+
+    def test_a_speed_outside_one_atempo_is_reached_in_steps(self):
+        self.assertEqual(cutplan.tempo_chain(1.1), "atempo=1.1")
+        self.assertEqual(cutplan.tempo_chain(0.5), "atempo=0.5")
+        self.assertEqual(cutplan.tempo_chain(0.25), "atempo=0.5,atempo=0.5")
+        self.assertEqual(cutplan.tempo_chain(0.3), "atempo=0.5,atempo=0.6")
+        self.assertEqual(cutplan.tempo_chain(150), "atempo=100.0,atempo=1.5")
+        for sp in (0.01, 0.07, 0.2, 0.49, 0.5, 0.9, 3, 100, 101, 5000):
+            parts = [float(x.split("=")[1]) for x in cutplan.tempo_chain(sp).split(",")]
+            self.assertTrue(all(0.5 <= x <= 100.0 for x in parts), (sp, parts))
+            product = 1.0
+            for x in parts:
+                product *= x
+            self.assertAlmostEqual(product, sp, places=9)
+        a = cutplan.shot_audio_filter({"in": 0, "out": 0.2, "frames": 24, "speed": 0.25})
+        self.assertIn(",atempo=0.5,atempo=0.5,aresample=48000,apad=whole_len=38400,", a)
 
     def test_a_shot_past_the_end_of_its_source_is_reported(self):
         shots = [{"src": "main", "in": 5.0, "out": 6.0}, {"src": "main", "in": 9.4, "out": 10.4},
@@ -176,15 +208,19 @@ class FrameGrid(unittest.TestCase):
                  {"src": "main", "in": 2.0, "out": 3.0, "a_in": 29.5, "a_src": "mic"},
                  {"src": "main", "in": 2.0, "out": 3.0, "a_in": 28.0, "a_src": "mic"}]
         got = cutplan.past_end(shots, {"main": 10.0, "mic": 30.0})
-        self.assertEqual([(shots.index(s), key, have, nothing) for s, key, have, nothing in got],
-                         [(1, "main", 10.0, False), (2, "main", 10.0, False), (3, "mic", 30.0, False)])
+        self.assertEqual([(shots.index(r["shot"]), r["field"], r["key"], r["start"], r["end"], r["have"], r["nothing"])
+                          for r in got],
+                         [(1, "in", "main", 9.4, 10.4, 10.0, False), (2, "g_in", "main", 9.5, 10.5, 10.0, False),
+                          (3, "a_in", "mic", 29.5, 30.5, 30.0, False)])
         self.assertEqual(cutplan.past_end(shots, {"main": None}), [])            # a length that cannot be read
         self.assertEqual(cutplan.past_end([{"src": "main", "in": 9.0, "out": 10.04}], {"main": 10.0}), [])
         for start in (10.0, 12.5, 9.97):                                         # nothing of the source is left to show
             got = cutplan.past_end([{"src": "main", "in": start, "out": start + 1}], {"main": 10.0})
-            self.assertEqual([x[3] for x in got], [True], start)
+            self.assertEqual([r["nothing"] for r in got], [True], start)
         got = cutplan.past_end([{"src": "main", "in": 2.0, "out": 3.0, "a_in": 31.0, "a_src": "mic"}], {"mic": 30.0})
-        self.assertEqual([(x[1], x[3]) for x in got], [("mic", True)])
+        self.assertEqual([(r["key"], r["field"], r["nothing"]) for r in got], [("mic", "a_in", True)])
+        both = cutplan.past_end([{"src": "main", "in": 9.5, "out": 10.5, "g_in": 9.8}], {"main": 10.0})
+        self.assertEqual([r["field"] for r in both], ["in", "g_in"])             # each read is reported
 
     def test_a_shot_that_starts_past_its_source_stops_the_run(self):
         d = tempfile.mkdtemp()
@@ -199,10 +235,17 @@ class FrameGrid(unittest.TestCase):
         self.assertEqual(cut_short.past_end_warnings(sp, [{"src": "main", "in": 1.0, "out": 2.0}], fp), [])
         with self.assertRaises(cut_short.CutError) as cm:
             cut_short.past_end_warnings(sp, [{"src": "main", "in": 1.0, "out": 2.0}, {"src": "main", "in": 11.0, "out": 12.0}], fp)
-        self.assertIn("starts past the end of source 'main'", str(cm.exception))
+        self.assertIn("the shot at 11.00-12.00 starts past the end of source 'main'", str(cm.exception))
+        # A read that is not at "in" is named by its own field and range.
+        lines = cut_short.past_end_warnings(sp, [{"src": "main", "in": 0.0, "out": 1.0, "g_in": 9.5}], fp)
+        self.assertIn("WARN the shot at 0.00-1.00 (its \"g_in\", 9.50-10.50) reads past the end of source 'main'", lines[0])
+        self.assertIn("Fix its \"g_in\" or its length", lines[0])
+        with self.assertRaises(cut_short.CutError) as cm:
+            cut_short.past_end_warnings(sp, [{"src": "main", "in": 0.0, "out": 1.0, "a_in": 30.0}], fp)
+        self.assertIn("(its \"a_in\", 30.00-31.00) starts past the end", str(cm.exception))
 
     def test_a_shot_is_read_past_its_out(self):
-        # A read of exactly the shot's length can hold no frame at all.
+        # The frames after the shot are read too, and cut off by the frame count.
         self.assertAlmostEqual(cutplan.read_length({"in": 7.0, "out": 7.033}), 0.533)
         self.assertGreaterEqual(cutplan.READ_MARGIN, 0.25)
 

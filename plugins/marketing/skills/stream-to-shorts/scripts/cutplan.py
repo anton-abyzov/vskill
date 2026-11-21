@@ -406,15 +406,17 @@ def shot_video_filter(shot, layout_name, src_w, src_h, facecam=None, layout=DEFA
     input 1 the source at "g_in" when present. Output label [v]."""
     win = shot_windows(shot, layout_name, src_w, src_h, facecam, layout)
     W, H = layout["width"], layout["height"]
+    grid = shot_grid(shot)
     if win["layout"] == "full":
         x, y, w, h = win["screen"]
-        return "[0:v]setpts=PTS-STARTPTS,crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos,setsar=1[v]" % (w, h, x, y, W, H)
+        return ("[0:v]setpts=PTS-STARTPTS%s,crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos,setsar=1[v]"
+                % (grid, w, h, x, y, W, H))
     st = layout["stack"]
     x, y, w, h = win["screen"]
     fx, fy, fw, fh = win["face"]
     gin = "g_in" in shot
-    gi = "[1:v]setpts=PTS-STARTPTS[g]" if gin else "[0:v]setpts=PTS-STARTPTS,split=2[g][f]"
-    fi = "[0:v]setpts=PTS-STARTPTS," if gin else "[f]"
+    gi = ("[1:v]setpts=PTS-STARTPTS%s[g]" if gin else "[0:v]setpts=PTS-STARTPTS%s,split=2[g][f]") % grid
+    fi = ("[0:v]setpts=PTS-STARTPTS%s," % grid) if gin else "[f]"
     sharp = ",unsharp=5:5:0.6" if st["face_h"] / float(fh) > layout["sharpen_over"] else ""
     return (gi + ";"
             "[g]crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos[gg];" % (w, h, x, y, W, st["screen_h"])
@@ -433,60 +435,86 @@ def shot_audio_filter(shot):
     gate = ("agate=threshold=%s:ratio=9:attack=4:release=90:range=0.05," % shot["gate"]) if shot.get("gate") else ""
     pad = "[1:a]" if "a_in" in shot and "g_in" not in shot else "[0:a]"
     return (pad + "asetpts=PTS-STARTPTS," + gate + "volume=%s,afade=t=in:d=0.01,afade=t=out:st=%.3f:d=0.01" % (shot.get("vol", 1.0), fo)
-            + (",atempo=%s" % sp if sp != 1 else "") + _exact_length(shot) + "[a2]")
+            + ("," + tempo_chain(sp) if sp != 1 else "") + _exact_length(shot) + "[a2]")
 
 
-def shot_video_tail(shot):
-    """The end of a shot's picture chain, [v] to [v2]: the speed change, then
-    exactly "frames" frames at FPS.
+def shot_grid(shot):
+    """Filters that put one picture input of a shot on the output grid: the
+    speed change, then exactly "frames" frames at FPS. They follow
+    setpts=PTS-STARTPTS on every picture input, before any crop or scale.
 
     A cap on the frame count is not enough. A source at another frame rate, or
     a slowed shot, runs out of frames before the count is reached (24 frames a
     second gives 17 frames for 0.733 s, which reach 21 of the 23 planned), and
     the encoder then ends the sound with the picture. So the picture is put on
     the FPS grid from time 0, its last frame is held, and the count cuts it.
+    This is done first because the scale filter does not pass on the time its
+    input ends at: after it the last real frame of a shot that ends with its
+    source is dropped and the one before it held in its place.
     """
     sp = shot.get("speed", 1.0)
-    head = ("setpts=PTS/%s," % sp) if sp != 1 else ""
-    if "frames" not in shot:
-        return ";[v]%s[v2]" % (head.rstrip(",") or "null")
-    return ";[v]%sfps=%d:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d[v2]" % (head, FPS, shot["frames"])
+    out = (",setpts=PTS/%s" % sp) if sp != 1 else ""
+    if "frames" in shot:
+        out += ",fps=%d:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d" % (FPS, shot["frames"])
+    return out
+
+
+SHOT_VIDEO_OUT = ";[v]null[v2]"     # the picture chain of a shot ends in [v2]
+
+
+def tempo_chain(speed):
+    """atempo filters for a speed. One atempo takes 0.5 to 100, so a speed
+    outside that is reached in steps."""
+    parts, rest = [], float(speed)
+    while rest < 0.5:
+        parts.append(0.5)
+        rest /= 0.5
+    while rest > 100.0:
+        parts.append(100.0)
+        rest /= 100.0
+    if rest != 1.0 or not parts:
+        parts.append(rest)
+    return ",".join("atempo=%s" % x for x in parts)
 
 
 def read_length(shot):
     """Seconds of source to read for a shot: its length and READ_MARGIN more.
 
-    A read of exactly the shot's length loses frames. The source's frame at
-    "in" can sit a hair before it and be thrown away, and the last frame
-    falls outside a window that ends on its own time; a one-frame shot then
-    has no picture at all and the join fails. The extra is read and not
-    used: shot_video_tail cuts the picture at the frame count, and the sound
-    is silent after its closing fade and cut to length by _exact_length.
+    With a read that ends exactly where the shot ends, how long the last
+    frame is shown depends on the end time the decoder reports for the
+    stream, and not every filter or build passes that on. Reading past the
+    end makes the frames after the shot real input, so the picture never
+    leans on it. The extra is not used: shot_grid cuts the picture at the
+    frame count, and the sound is silent after its closing fade and cut to
+    length by _exact_length.
     """
     return shot["out"] - shot["in"] + READ_MARGIN
 
 
 def past_end(shots, lengths):
-    """Shots that read past the end of a source: [(shot, source key, source length, starts past it)].
+    """Reads of a shot that run past the end of a source:
+    [{"shot", "field", "key", "start", "end", "have", "nothing"}].
 
     lengths maps a source key to its length in seconds (None when unknown).
-    A shot that ends past the source still renders to its planned length, on
-    a held last frame and silence, so it has to be reported. One that starts
-    there has nothing to show at all (the last element is True). Pure.
+    "field" is the spec field the read starts at ("in", "g_in" or "a_in"),
+    "start" and "end" its range in source time and "have" the source's
+    length. A shot that ends past the source still renders to its planned
+    length, on a held last frame and silence, so it has to be reported. One
+    that starts there has nothing to show at all ("nothing" is True). Pure.
     """
     out = []
     for s in shots:
         d = s["out"] - s["in"]
-        reads = [(s["src"], s["in"])]
+        reads = [("in", s["src"], s["in"])]
         if "g_in" in s:
-            reads.append((s["src"], s["g_in"]))
+            reads.append(("g_in", s["src"], s["g_in"]))
         elif "a_in" in s:
-            reads.append((s.get("a_src", s["src"]), s["a_in"]))
-        for key, start in reads:
+            reads.append(("a_in", s.get("a_src", s["src"]), s["a_in"]))
+        for field, key, start in reads:
             have = lengths.get(key)
             if have is not None and start + d > have + 0.05:
-                out.append((s, key, have, start > have - 0.05))
-                break
+                out.append({"shot": s, "field": field, "key": key, "start": start, "end": round(start + d, 3),
+                            "have": have, "nothing": start > have - 0.05})
     return out
 
 

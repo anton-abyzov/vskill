@@ -69,6 +69,26 @@ class LoadSpec(unittest.TestCase):
             self.refused("speed", segments=[{"in": 1.0, "out": 3.0, "speed": bad}])
             self.refused("numeric", segments=[{"in": 1.0, "out": bad}])
 
+    def test_segment_numbers_are_checked(self):
+        ok = {"in": 1.0, "out": 3.0}
+        good = dict(ok, a_in=0, vol=0, z=1.2, punch=1.1, gap=0, face_dy=-40, gate=0.02)
+        self.assertEqual(self.load(segments=[good])["segments"][0]["z"], 1.2)
+        self.assertEqual(self.load(segments=[dict(ok, g_in=5.0, gate=None)])["segments"][0]["g_in"], 5.0)
+        for key, values in (("a_in", ("5", -1, True, float("nan"))), ("g_in", ("5", -0.5, None)),
+                            ("vol", ("1", -1, float("inf"))), ("z", (0, -1, "1.2", True)), ("punch", (0, "x")),
+                            ("gap", (-0.1, "0.3")), ("face_dy", ("10", None, float("nan"))),
+                            ("gate", ("0.02", -0.1, 1.5, True, float("nan")))):
+            for bad in values:
+                self.refused("\"%s\"" % key, segments=[dict(ok, **{key: bad})])
+        self.refused("variants.b.segments[0]", variants={"b": {"segments": [dict(ok, z=0)]}})
+
+    def test_a_moved_screen_needs_the_stack_layout(self):
+        seg = {"in": 1.0, "out": 3.0, "g_in": 40.0}
+        self.refused("g_in", layout="full", segments=[seg])
+        self.refused("g_in", segments=[dict(seg, layout="full")])
+        self.assertEqual(self.load(layout="full", segments=[dict(seg, layout="stack")])["segments"][0]["g_in"], 40.0)
+        self.assertEqual(self.load(segments=[seg])["segments"][0]["g_in"], 40.0)
+
     def test_times_are_numbers_not_text(self):
         for seg in ({"in": "1.0", "out": 3.0}, {"in": 1.0, "out": "3.0"}, {"in": True, "out": 3.0},
                     {"in": None, "out": 3.0}, {"in": [1.0], "out": 3.0}, 5, "1-3"):

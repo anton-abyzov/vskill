@@ -454,6 +454,13 @@ class Bed(unittest.TestCase):
         self.assertIsNone(cut_short.probe_length(stand_in(self.d, "fp4", "print('N/A')\n"), "src.mp4"))
         self.assertIsNone(cut_short.probe_length(os.path.join(self.d, "missing"), "src.mp4"))
 
+    def test_a_cut_too_short_to_measure_says_so(self):
+        cut_short.check_measured({"input_i": "-23.10"}, 9.0)
+        for bad in ("-inf", "inf", "-Inf"):
+            with self.assertRaises(cut_short.CutError) as cm:
+                cut_short.check_measured({"input_i": bad}, 0.13)
+            self.assertIn("0.13 s", str(cm.exception))
+
     def test_no_bed_leaves_the_chain_as_it_was(self):
         self.assertEqual(cut_short.audio_args("ffmpeg-not-run", None, "CHAIN", "TAIL", 9.0, None),
                          ([], ["-af", "CHAIN,TAIL"]))

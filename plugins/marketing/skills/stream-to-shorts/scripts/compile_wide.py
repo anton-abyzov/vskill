@@ -273,6 +273,7 @@ def main(argv=None):
             j = json.loads(m[m.rfind("{"):m.rfind("}") + 1])
         except ValueError:
             raise CutError("loudnorm first pass gave no measurement")
+        cut_short.check_measured(j, dur)
         ln = ("loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=false"
               % (j["input_i"], j["input_tp"], j["input_lra"], j["input_thresh"], j["target_offset"]))
         # The compilation gets a room-tone bed when one of its specs asks for one.

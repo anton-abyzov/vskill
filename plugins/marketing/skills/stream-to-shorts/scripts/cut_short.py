@@ -453,6 +453,15 @@ def loudness(ff, path, env):
     return {"I": g("I"), "LRA": g("LRA"), "TP": g("Peak")}
 
 
+def check_measured(measured, dur):
+    """Stop when the first loudness pass could not measure the cut: under
+    about half a second of sound, or digital silence, reads as -inf, and the
+    second pass then fails with a message about nothing."""
+    if "inf" in str(measured.get("input_i")).lower():
+        raise CutError("the loudness of the cut cannot be measured: it is %.2f s long and needs at least half a "
+                       "second of sound that is not silent" % dur)
+
+
 def label_report(spec, shots, lang=None):
     """The labels as placed, for metrics.json: each with the text that was
     burned (the translation with `lang`), the times it was typed with and the
@@ -509,6 +518,7 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
         j = json.loads(m[m.rfind("{"):m.rfind("}") + 1])
     except ValueError:
         raise CutError("loudnorm first pass gave no measurement")
+    check_measured(j, dur)
     ln = ("loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=false"
           % (j["input_i"], j["input_tp"], j["input_lra"], j["input_thresh"], j["target_offset"]))
     out_name = "%s%s%s.mp4" % (spec["id"], tagv, tagl)

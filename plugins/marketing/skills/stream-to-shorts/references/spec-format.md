@@ -45,7 +45,8 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 | `fix` | no | `{heard: shown}`, applied to every caption word (exact match first, then lower case). An empty value removes the word |
 | `cap_edit` | no | `[[t0, t1, text]]`: replaces each caption word that starts in that output-time range; empty text removes it |
 | `alt_words` | no | `[[t0, t1]]` ranges whose captions use the second highlight colour (a second speaker) |
-| `labels` | no | `[{"at", "dur", "text", "y"}]`; `y` is optional |
+| `labels` | no | `[{"at", "dur", "text", "y"}]`; `y` is optional. `at` and `dur` say which shot: the label starts on the frame of the cut nearest to `at` and ends on the frame of the later cut nearest to `at + dur`, so it always covers whole shots |
+| `bed` | no | Level in dBFS, between -80 and -40, of a quiet noise bed under the whole clip; use about -55 for a stream whose sound went through a noise gate (its pauses are digital silence). Needs an ffmpeg with `anoisesrc`, `volumedetect` and `amix normalize` (4.4 or later). `compile_wide.py` lays a bed when one of its specs has one, at the highest of their levels |
 | `variants` | no | `{name: {"bar", "segments", "cap_edit"}}`: an alternate opening. Each key is optional; a variant with no `segments` uses the main ones, and `segments`, when given, must not be empty. With a variant only the variant's `cap_edit` applies; `fix` still applies |
 | `translations` | no | `{lang: {"bar", "caps": [[t0, t1, text]], "labels": {index or original text: text}}}` |
 | `language` | no | Language code passed to the transcribe command, default `en` |
@@ -75,9 +76,9 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 
 ### What the cutter writes
 
-`plan --out` writes `plan[-variant].json` (the shot list with its crop windows). `render` and `finish` write, in `--out`: `<id>[-variant][-lang].mp4` (the master), `shots[-variant].json`, `words[-variant].json` (caption words in output time, before fixes), `burned[-variant].json` (the words as burned, after `fix` and `cap_edit`), `cap[-variant][-lang].ass`, `metrics[-variant][-lang].json` and `base[-variant].nut` (the cut before text).
+`plan --out` writes `plan[-variant].json` (the shot list with its crop windows). Each shot carries `frames`, its length in output frames at 30 a second; `in` and `out` sit on that grid, so a span ends up to one frame before the `out` that was typed. `render` and `finish` write, in `--out`: `<id>[-variant][-lang].mp4` (the master), `shots[-variant].json`, `words[-variant].json` (caption words in output time, before fixes), `burned[-variant].json` (the words as burned, after `fix` and `cap_edit`), `cap[-variant][-lang].ass`, `metrics[-variant][-lang].json` and `base[-variant].nut` (the cut before text).
 
-`metrics.json`: `file`, `duration_s`, `shots`, `longest_shot`, `first_change_s` (the end of the first shot), `cuts_per_min`, `first_word_s`, `words`, `wpm`, `speech_gaps_over_0.6`, `loudness` (`I`, `LRA`, `TP`), `size_mb`, and `words_source` (`words-file`, `transcribed` or `source-transcript`). `source-transcript` means the stream transcript was mapped through the cut and carries its errors.
+`metrics.json`: `file`, `duration_s`, `shots`, `longest_shot`, `first_change_s` (the end of the first shot), `cuts_per_min`, `first_word_s`, `words`, `wpm`, `speech_gaps_over_0.6`, `loudness` (`I`, `LRA`, `TP`), `size_mb`, `bed_dbfs`, `planned_s` (the length of the plan in whole frames), `labels` (each with `at` and `end`, the cut times it sits on, `typed_at`, `typed_end` and `on_cuts`), and `words_source` (`words-file`, `transcribed` or `source-transcript`). `source-transcript` means the stream transcript was mapped through the cut and carries its errors.
 
 `--words` takes words in output time. The spec's `transcripts` are source time. Do not mix them.
 

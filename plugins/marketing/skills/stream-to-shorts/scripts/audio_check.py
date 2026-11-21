@@ -25,14 +25,18 @@ It also lists dropouts: stretches of 0.2 s or longer near digital silence
 (under -70 dBFS) with sound on both sides. Room tone never gets that quiet,
 so a dropout is a hole left by a cut, a gate or a separated voice stem, and it
 plays as a glitch, not as a pause. An independent check of the source run
-found these on clips whose loudness numbers were all in range.
+found these on clips whose loudness numbers were all in range. A stream whose
+sound went through a noise gate has one in every pause, and no room tone
+anywhere to fill it with: give the cut spec a "bed" (see cut_short.py). A bed
+at -55 dBFS keeps every pause above the -70 dBFS line this check uses.
 
 Verdicts:
 - loudness -14 LUFS plus or minus 1: FAIL outside
 - true peak at or below -1 dBFS: FAIL above
 - clipped samples: FAIL when any
 - first word at or before 0.2 s: WARN after
-- pauses inside speech: CHECK over 0.3 s, WARN over 0.5 s
+- pauses inside speech: CHECK over 0.35 s, WARN over 0.5 s (the cut leaves
+  0.3 s; 0.35 s is the cap, one and a half frames of room for word timings)
 - silences, dropouts and dipped words: WARN
 
 Exit code 1 when any verdict is FAIL, 2 on an error, 0 otherwise.
@@ -51,7 +55,7 @@ TARGET_LUFS = -14.0
 LUFS_TOLERANCE = 1.0
 MAX_TRUE_PEAK = -1.0
 MAX_FIRST_WORD = 0.2
-PAUSE_CHECK = 0.3
+PAUSE_CHECK = 0.35
 PAUSE_WARN = 0.5
 DIP_DB = -50.0
 DROPOUT_DB = -70.0
@@ -198,10 +202,10 @@ def verdicts(m):
             v.append(("WARN", "pauses over %.1f s: %s" % (PAUSE_WARN, ", ".join(
                 "%.2f-%.2f" % (a, b) for a, b, _ in long_gaps))))
         if mid_gaps:
-            v.append(("CHECK", "pauses over %.1f s: %s" % (PAUSE_CHECK, ", ".join(
+            v.append(("CHECK", "pauses over %.2f s: %s" % (PAUSE_CHECK, ", ".join(
                 "%.2f-%.2f" % (a, b) for a, b, _ in mid_gaps))))
         if not gaps:
-            v.append(("PASS", "no pause over %.1f s inside speech" % PAUSE_CHECK))
+            v.append(("PASS", "no pause over %.2f s inside speech" % PAUSE_CHECK))
         dips = m.get("dipped", [])
         if dips:
             v.append(("WARN", "words with a 50 ms window under %.0f dBFS (listen): %s" % (

@@ -11,6 +11,11 @@ title bar, captions and labels, cleans and normalises the sound to -14 LUFS and
 writes the master and metrics.json. Run finish alone after editing the spec's
 bar, labels, fix or cap_edit, or words.json: it reuses the cut.
 
+A spec "bed" (a level in dBFS, about -55) lays quiet noise under the whole
+clip. Use it when the stream's sound went through a noise gate: its pauses are
+digital silence, the recording holds no room tone to fill them with, and each
+one plays as a hole.
+
 Files in DIR: <id>[-variant][-lang].mp4, shots[-variant].json,
 words[-variant].json (caption words before fixes), burned[-variant].json (the
 words as burned, after fix and cap_edit; what caption_check.py compares),
@@ -47,6 +52,13 @@ import cutplan
 
 
 NAME_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+# The room-tone bed: pink noise with the top rolled off, the same every run,
+# in stereo like the cut (its level is measured after that step, which is not
+# free: one channel spread over two comes out quieter).
+BED_NOISE = "anoisesrc=color=pink:seed=7:sample_rate=48000:duration=%.3f,lowpass=f=4000,aformat=channel_layouts=stereo"
+BED_RANGE = (-80.0, -40.0)
+LOUDNORM_RATE = 192000   # loudnorm hands on 192 kHz; the bed joins it at that rate, before the limiter
 
 
 class CutError(Exception):
@@ -140,6 +152,10 @@ def load_spec(path):
             sp = seg.get("speed", 1.0)
             if isinstance(sp, bool) or not isinstance(sp, (int, float)) or not math.isfinite(sp) or sp <= 0:
                 raise CutError("%s[%d]: \"speed\" must be a number above 0" % (name, i))
+    bed = spec.get("bed")
+    if bed is not None and (isinstance(bed, bool) or not isinstance(bed, (int, float)) or not math.isfinite(bed)
+                            or not BED_RANGE[0] <= bed <= BED_RANGE[1]):
+        raise CutError("spec \"bed\" must be a level in dBFS between %d and %d (about -55)" % BED_RANGE)
     if not spec.get("sources"):
         raise CutError("spec has no \"sources\": {key: path}")
     if "src" not in spec:
@@ -230,8 +246,9 @@ def build(spec, shots, outdir, variant, ff, fp, env):
             ain = ["-ss", "%.3f" % s["a_in"], "-t", "%.3f" % d, "-i", spec["sources"][s.get("a_src", src_key)]]
         p = os.path.join(outdir, "shot%03d.nut" % i)
         run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % d, "-i", src] + ain
-            + ["-filter_complex", vf + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", "30",
-               "-c:v", "libx264", "-crf", "12", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            + ["-filter_complex", vf + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", str(cutplan.FPS)]
+            + frame_limit(s)
+            + ["-c:v", "libx264", "-crf", "12", "-preset", "veryfast", "-pix_fmt", "yuv420p",
                "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
             "ffmpeg shot %d" % i, env=env)
         parts.append(p)
@@ -250,6 +267,41 @@ def build(spec, shots, outdir, variant, ff, fp, env):
     with open(os.path.join(outdir, "shots%s.json" % tagv), "w") as f:
         json.dump(shots, f, indent=1)
     return base
+
+
+def frame_limit(shot):
+    """Output options that stop a shot's picture at its planned frame count.
+    With the exact sound length from cutplan.shot_audio_filter, no shot is
+    longer than planned and the join adds no silence."""
+    return ["-frames:v", str(shot["frames"])] if "frames" in shot else []
+
+
+def bed_gain(ff, level, env):
+    """Gain in dB that puts the bed noise at `level` dBFS RMS. Measured, since
+    noise sources are not equally loud in every ffmpeg build."""
+    try:
+        r = subprocess.run([ff, "-hide_banner", "-nostats", "-f", "lavfi", "-i", BED_NOISE % 5.0,
+                            "-af", "volumedetect", "-f", "null", "-"],
+                           capture_output=True, text=True, env=env, errors="replace")
+    except OSError as e:
+        raise CutError("cannot run %s (%s)" % (ff, e))
+    m = re.search(r"mean_volume:\s*(-?[\d.]+) dB", r.stderr)
+    if not m:
+        raise CutError("could not measure the noise bed: this ffmpeg needs the anoisesrc and volumedetect filters")
+    return level - float(m.group(1))
+
+
+def audio_args(ff, bed, chain, tail, dur, env):
+    """(extra inputs, audio options) for the finishing pass. chain is the
+    clean-up and loudness part, tail the limiter and the closing fade; the bed
+    is mixed in between, so the limiter sees it."""
+    if bed is None:
+        return [], ["-af", chain + "," + tail]
+    fc = ("[0:a]%s[m];[1:a]volume=%.2fdB,aresample=%d[b];"
+          "[m][b]amix=inputs=2:duration=first:normalize=0,%s[a]"
+          % (chain, bed_gain(ff, bed, env), LOUDNORM_RATE, tail))
+    return (["-f", "lavfi", "-i", BED_NOISE % (dur + 1.0)],
+            ["-filter_complex", fc, "-map", "0:v", "-map", "[a]"])
 
 
 def default_transcribe_cmd():
@@ -315,6 +367,14 @@ def loudness(ff, path, env):
     return {"I": g("I"), "LRA": g("LRA"), "TP": g("Peak")}
 
 
+def label_report(spec, shots):
+    """The labels as placed, for metrics.json: each with the times it was typed
+    with and the cut times it got."""
+    return [{"text": lb["text"], "at": t0, "end": t1,
+             "typed_at": lb["at"], "typed_end": round(lb["at"] + lb["dur"], 3), "on_cuts": f0 is not None}
+            for lb, t0, t1, f0, _ in captions.placed_labels(spec, shots)]
+
+
 def metrics_for(out, dur, shots, words, ff, env):
     longest = max(s["t1"] - s["t0"] for s in shots) if shots else 0
     gaps = [(round(a["e"], 2), round(b["s"], 2)) for a, b in zip(words, words[1:]) if b["s"] - a["e"] > 0.6]
@@ -339,8 +399,8 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
         words = json.load(f)
     ass_name = "cap%s%s.ass" % (tagv, tagl)
     try:
-        text = captions.build_ass(spec, words, variant, lang)
-    except (ValueError, KeyError) as e:
+        text = captions.build_ass(spec, words, variant, lang, shots=shots)
+    except (ValueError, KeyError, TypeError) as e:
         raise CutError("captions: %s" % e)
     with open(os.path.join(outdir, ass_name), "w") as f:
         f.write(text)
@@ -363,13 +423,19 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
     out_name = "%s%s%s.mp4" % (spec["id"], tagv, tagl)
     out = os.path.join(outdir, out_name)
     vf = "drawbox=x=0:y=%d:w=%d:h=%d:color=white:t=fill,ass=%s" % (bar_y, lay["width"], lay["bar_h"], ass_name)
-    run([ff, "-v", "error", "-y", "-i", os.path.basename(base), "-vf", vf,
-         "-af", "%s,%s,alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.05" % (pre, ln, max(0.0, dur - 0.05)),
-         "-c:v", "libx264", "-profile:v", "high", "-level", "4.2", "-crf", "17", "-maxrate", "12M", "-bufsize", "24M",
-         "-preset", "slow", "-pix_fmt", "yuv420p", "-r", "30", "-g", "60",
-         "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", out_name],
+    extra, audio = audio_args(ff, spec.get("bed"), "%s,%s" % (pre, ln),
+                              "alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.05" % max(0.0, dur - 0.05),
+                              dur, env)
+    run([ff, "-v", "error", "-y", "-i", os.path.basename(base)] + extra + ["-vf", vf] + audio
+        + ["-c:v", "libx264", "-profile:v", "high", "-level", "4.2", "-crf", "17", "-maxrate", "12M", "-bufsize", "24M",
+           "-preset", "slow", "-pix_fmt", "yuv420p", "-r", "30", "-g", "60",
+           "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", out_name],
         "ffmpeg finish", cwd=outdir, env=env)
     met = metrics_for(out, dur, shots, words, ff, env)
+    met["bed_dbfs"] = spec.get("bed")
+    met["labels"] = label_report(spec, shots)
+    cuts = cutplan.cut_frames(shots)
+    met["planned_s"] = round(cuts[-1] / float(cutplan.FPS), 3) if cuts else None
     mpath = os.path.join(outdir, "metrics%s%s.json" % (tagv, tagl))
     for prev in (mpath, os.path.join(outdir, "metrics%s.json" % tagv)):
         if words_source is None and os.path.exists(prev):
@@ -390,6 +456,15 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
         print("WARN no caption words")
     if met["longest_shot"] > limit + 0.05:
         print("WARN longest shot %.2f s is over the %.2f s limit" % (met["longest_shot"], limit))
+    if met["planned_s"] is not None and abs(dur - met["planned_s"]) > 0.5 / cutplan.FPS:
+        print("WARN the cut is %.3f s long and the plan %.3f s: a shot is off the frame grid, so cuts and labels "
+              "have drifted. Render again" % (dur, met["planned_s"]))
+    for lb in met["labels"]:
+        if not lb["on_cuts"]:
+            print("WARN label %r is not on a cut: this shot list has no frame counts. Render again" % lb["text"])
+        elif max(abs(lb["at"] - lb["typed_at"]), abs(lb["end"] - lb["typed_end"])) > 2.5 / cutplan.FPS:
+            print("NOTE label %r was typed %.2f-%.2f and sits on the cuts at %.2f-%.2f: check it is the right shot"
+                  % (lb["text"], lb["typed_at"], lb["typed_end"], lb["at"], lb["end"]))
     return met
 
 

@@ -20,7 +20,7 @@ import re
 import sys
 import textwrap
 
-from cutplan import DEFAULT_LAYOUT
+from cutplan import DEFAULT_LAYOUT, FPS, cut_frames, snap_label
 
 DEFAULT_FONT = "Arial Black"
 DEFAULT_COLORS = {
@@ -41,6 +41,36 @@ def ass_time(t):
     """Seconds to ASS time h:mm:ss.cc (negative clamps to 0)."""
     t = max(0, t)
     return "%d:%02d:%05.2f" % (t // 3600, t % 3600 // 60, t % 60)
+
+
+def cut_time(frame, fps=FPS):
+    """ASS time for an event that starts or ends on a cut, given as a frame number.
+
+    ASS counts in hundredths of a second and a frame at 30 a second is 3.33 of
+    them, so a time rounded to the nearest hundredth can land after its frame
+    and show the event one frame late. This is the last hundredth before the
+    frame's own time: after the frame before it, never after the frame.
+    """
+    cs = max(0, (int(frame) * 100 + fps - 1) // fps - 1)
+    return "%d:%02d:%02d.%02d" % (cs // 360000, cs // 6000 % 60, cs // 100 % 60, cs % 100)
+
+
+def placed_labels(spec, shots=None):
+    """Where each label of the spec goes: [(label, start, end, first frame, end frame)].
+
+    With the shot list every label is moved onto the cuts (see
+    cutplan.snap_label) and start and end are the cut times; the frames are
+    None without a shot list on the frame grid, and the typed times are kept.
+    """
+    cuts = cut_frames(shots) if shots else None
+    out = []
+    for lb in spec.get("labels", []):
+        if cuts:
+            f0, f1 = snap_label(lb["at"], lb["dur"], cuts)
+            out.append((lb, round(f0 / float(FPS), 3), round(f1 / float(FPS), 3), f0, f1))
+        else:
+            out.append((lb, lb["at"], lb["at"] + lb["dur"], None, None))
+    return out
 
 
 def bar_font_size(text, width=780, char_w=0.52, caps=(74, 46)):
@@ -142,8 +172,11 @@ def burned_words(spec, words, variant=None):
     return apply_fixes(words, spec.get("fix", {}), cap_edit)
 
 
-def build_ass(spec, words, variant=None, lang=None, layout=DEFAULT_LAYOUT):
+def build_ass(spec, words, variant=None, lang=None, layout=DEFAULT_LAYOUT, shots=None):
     """ASS text: title bar for the whole clip, labels, and word captions.
+
+    With shots (the cutter's shot list) every label starts on the frame of a
+    cut and ends on the frame of a later cut, whatever times were typed.
 
     With lang, the bar, labels and captions come from spec["translations"][lang]
     ({"bar", "caps": [[t0, t1, text]], "labels": {index or text: text}}) and the
@@ -177,13 +210,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ev = ["Dialogue: 5,%s,%s,Bar,,0,0,0,,{\\pos(%d,%d)}" % (ass_time(0), ass_time(9999), CX, bar_y + layout["bar_h"] // 2)
           + ass_text(bar.upper())]
     tr = translation(spec, lang) if lang else None
-    for i, lb in enumerate(spec.get("labels", [])):
+    for i, (lb, t0, t1, f0, f1) in enumerate(placed_labels(spec, shots)):
         txt = lb["text"]
         if tr:
             labels = tr.get("labels", {})
             txt = labels.get(str(i), labels.get(lb["text"], txt))
         y = min(layout["label_max_y"], lb.get("y", lab_y))
-        ev.append("Dialogue: 4,%s,%s,Label,,0,0,0,,{\\pos(%d,%d)}" % (ass_time(lb["at"]), ass_time(lb["at"] + lb["dur"]), CX, y)
+        times = (ass_time(t0), ass_time(t1)) if f0 is None else (cut_time(f0), cut_time(f1))
+        ev.append("Dialogue: 4,%s,%s,Label,,0,0,0,,{\\pos(%d,%d)}" % (times[0], times[1], CX, y)
                   + ass_text(txt))
     if tr:
         for t0, t1, txt in tr.get("caps", []):

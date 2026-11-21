@@ -204,7 +204,7 @@ class AudioPureTest(unittest.TestCase):
         v = audio_check.verdicts(bad)
         text = "\n".join("%s %s" % x for x in v)
         self.assertEqual(sum(1 for lv, _ in v if lv == "FAIL"), 3)
-        self.assertIn("CHECK pauses over 0.3", text)
+        self.assertIn("CHECK pauses over 0.35 s: 1.00-1.40", text)
         self.assertIn("WARN pauses over 0.5", text)
         self.assertIn("WARN first word", text)
         self.assertIn("two@0.26", text)

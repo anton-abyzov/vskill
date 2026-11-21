@@ -13,10 +13,17 @@ The plan printed this way uses no transcript, so tight segments stay whole.
 cut_short.py plan reads the transcripts named in the spec.
 
 Times are seconds. Source rectangles are [x, y, w, h] in source pixels.
+
+Every shot is a whole number of frames long at FPS, so the picture and the
+sound of a shot end together and the next shot starts on a frame: see
+expand_shots.
 """
 import argparse
 import json
 import sys
+
+FPS = 30               # the cutter renders every shot at this rate
+AUDIO_RATE = 48000     # and its sound at this one: 1600 samples a frame
 
 # Layout numbers. Taken from the constants of the cutter that ran
 # (canvas 1080x1920, face 0..640, title bar 640..760, screen 760..1920).
@@ -139,15 +146,29 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
     source key), its own "in"/"out", shifted "a_in"/"g_in" and a zoom "z".
     A segment "punch" sets the zoom of its punched shots, a segment "z" fixes
     it, and "still" keeps a segment as one shot.
+
+    Every shot gets "frames", its length in output frames at FPS, and its
+    "in" and "out" sit on that grid. A shot rendered to a length between two
+    frames leaves its picture a fraction of a frame longer than its sound;
+    the join then fills the difference with digital silence and every later
+    cut drifts off the planned time. So each span is rounded down to whole
+    frames: it never grows into a dropped range or past its "out". A span
+    that starts where the one before it ended, on the same picture and sound,
+    starts where that one really ended, so nothing is skipped between them.
     """
     mx = spec.get("shot", layout["max_shot"])
     default_src = spec.get("src")
     punch_default = spec.get("punch", layout["punch"])
     res, k = [], 0
+    prev = None     # (link, planned end, end on the frame grid) of the last span
     for seg in segments_for(spec, variant):
         src = seg.get("src", default_src)
         if src is None:
             raise PlanError("segment at %s has no source: set spec \"src\" or segment \"src\"" % seg.get("in"))
+        sp = seg.get("speed", 1.0)
+        if isinstance(sp, bool) or not isinstance(sp, (int, float)) or not sp > 0:
+            raise PlanError("segment at %s: \"speed\" must be a number above 0" % seg.get("in"))
+        link = (src, seg.get("a_src"), _offset(seg, "a_in"), _offset(seg, "g_in"))
         if seg.get("tight") and words_for is not None:
             # Pauses are cut on the sound the viewer hears (see audio_source).
             # When that sound comes from another source or time, the words
@@ -165,13 +186,24 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
         else:
             spans = [(seg["in"], seg["out"])]
         for (a, b) in spans:
-            d = b - a
+            start = a
+            if prev and prev[0] == link and abs(a - prev[1]) < 0.0005:
+                start = prev[2]
+            total = int((b - start) / sp * FPS + 1e-6)      # whole output frames, rounded down
+            prev = (link, b, start + total * sp / float(FPS))
+            if total < 1:
+                continue                                    # shorter than one frame
+            d = b - start
             n = 1 if seg.get("still") else max(1, int(-(-d // mx)))
+            n = min(n, total)
             for i in range(n):
+                f0 = (2 * total * i + n) // (2 * n)
+                f1 = (2 * total * (i + 1) + n) // (2 * n)
                 s = dict(seg)
                 s["src"] = src
-                s["in"] = round(a + d * i / n, 3)
-                s["out"] = round(a + d * (i + 1) / n, 3)
+                s["in"] = round(start + f0 * sp / float(FPS), 3)
+                s["out"] = min(round(start + f1 * sp / float(FPS), 3), max(b, s["in"]))
+                s["frames"] = f1 - f0
                 if "a_in" in seg:
                     s["a_in"] = round(seg["a_in"] + (s["in"] - seg["in"]), 3)
                 if "g_in" in seg:
@@ -186,17 +218,57 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
     return res
 
 
-def timeline(shots):
-    """Copy of the shots with t0/t1 in output time (a shot lasts (out - in) / speed)."""
-    res, t = [], 0.0
+def _offset(seg, key):
+    """How far a segment's "a_in" or "g_in" sits from its "in"; None without one."""
+    return round(seg[key] - seg["in"], 6) if key in seg else None
+
+
+def timeline(shots, fps=FPS):
+    """Copy of the shots with t0/t1 in output time.
+
+    Shots from expand_shots carry "frames", and their times are counted in
+    frames, so a cut is always at a frame. Shots without it (a shot list
+    written by hand) last (out - in) / speed.
+    """
+    res, t, f = [], 0.0, 0
+    grid = all("frames" in s for s in shots)
     for s in shots:
         s = dict(s)
-        d = s["out"] - s["in"]
-        s["t0"] = round(t, 3)
-        t += d / s.get("speed", 1.0)
-        s["t1"] = round(t, 3)
+        if grid:
+            s["t0"] = round(f / float(fps), 3)
+            f += s["frames"]
+            s["t1"] = round(f / float(fps), 3)
+        else:
+            d = s["out"] - s["in"]
+            s["t0"] = round(t, 3)
+            t += d / s.get("speed", 1.0)
+            s["t1"] = round(t, 3)
         res.append(s)
     return res
+
+
+def cut_frames(shots):
+    """Frame numbers of the cuts: where each shot starts, then where the last
+    one ends. None when a shot has no "frames" (a plan made before the grid)."""
+    if not shots or not all("frames" in s for s in shots):
+        return None
+    out, f = [0], 0
+    for s in shots:
+        f += s["frames"]
+        out.append(f)
+    return out
+
+
+def snap_label(at, dur, cuts, fps=FPS):
+    """(first frame, end frame) of a label typed as `at` and `dur` seconds.
+
+    A label belongs to a shot: it starts on a cut and ends on a later cut, so
+    it never sits over the picture before its own. The start is the cut
+    nearest to `at`, the end the later cut nearest to `at + dur`.
+    """
+    start = min(cuts[:-1], key=lambda c: (abs(c / float(fps) - at), c))
+    end = min((c for c in cuts if c > start), key=lambda c: (abs(c / float(fps) - (at + dur)), c))
+    return start, end
 
 
 def audio_source(shot, default_src=None):
@@ -325,14 +397,23 @@ def shot_video_filter(shot, layout_name, src_w, src_h, facecam=None, layout=DEFA
 
 
 def shot_audio_filter(shot):
-    """ffmpeg audio part for one shot: 10 ms fades at both cut points. Output label [a2]."""
+    """ffmpeg audio part for one shot: 10 ms fades at both cut points. Output label [a2].
+    A shot with "frames" is padded or trimmed to exactly that many frames of
+    sound, so it is never shorter than its picture."""
     d = shot["out"] - shot["in"]
     sp = shot.get("speed", 1.0)
     fo = max(0, d - 0.012)
     gate = ("agate=threshold=%s:ratio=9:attack=4:release=90:range=0.05," % shot["gate"]) if shot.get("gate") else ""
     pad = "[1:a]" if "a_in" in shot and "g_in" not in shot else "[0:a]"
     return (pad + "asetpts=PTS-STARTPTS," + gate + "volume=%s,afade=t=in:d=0.01,afade=t=out:st=%.3f:d=0.01" % (shot.get("vol", 1.0), fo)
-            + (",atempo=%s" % sp if sp != 1 else "") + "[a2]")
+            + (",atempo=%s" % sp if sp != 1 else "") + _exact_length(shot) + "[a2]")
+
+
+def _exact_length(shot):
+    if "frames" not in shot:
+        return ""
+    n = shot["frames"] * (AUDIO_RATE // FPS)
+    return ",aresample=%d,apad=whole_len=%d,atrim=end_sample=%d" % (AUDIO_RATE, n, n)
 
 
 def main(argv=None):

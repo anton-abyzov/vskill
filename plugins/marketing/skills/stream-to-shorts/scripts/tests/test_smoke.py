@@ -79,5 +79,123 @@ class SmokeRender(unittest.TestCase):
             self.assertTrue(json.load(f))          # the words as burned, for caption_check.py
 
 
+SMALL = (108, 192)      # the master, a tenth of its size, is enough to see a cut and a label
+
+
+def small_frames(path):
+    """Every frame of a video as rows of (r, g, b), scaled down to SMALL."""
+    r = subprocess.run([FFMPEG, "-v", "error", "-i", path, "-vf", "scale=%d:%d" % SMALL, "-f", "rawvideo",
+                        "-pix_fmt", "rgb24", "-"], capture_output=True)
+    size = SMALL[0] * SMALL[1] * 3
+    return [r.stdout[i:i + size] for i in range(0, len(r.stdout) - size + 1, size)]
+
+
+def screen_level(frame):
+    """Mean green level of the screen panel, away from the label and captions."""
+    w = SMALL[0]
+    rows = range(130, 180)
+    return sum(frame[(y * w + x) * 3 + 1] for y in rows for x in range(20, 90)) / float(len(rows) * 70)
+
+
+def red_pixels(frame):
+    """Red pixels where the label sits (the picture is grey, the label box red)."""
+    w = SMALL[0]
+    n = 0
+    for y in range(78, 93):
+        for x in range(20, 76):
+            r, g, b = frame[(y * w + x) * 3:(y * w + x) * 3 + 3]
+            if r - g > 60 and r - b > 60:
+                n += 1
+    return n
+
+
+def count(args):
+    return subprocess.run([FFPROBE, "-v", "error"] + args, capture_output=True, text=True).stdout.strip()
+
+
+@unittest.skipUnless(HAVE, "needs an ffmpeg with the ass filter (STS_FFMPEG or PATH) and ffprobe")
+class FrameGridRender(unittest.TestCase):
+    """The render itself: shots on the frame grid, a label on its cut frame,
+    and a room-tone bed under a stream whose pauses are digital silence."""
+
+    def render(self, tmp, spec, command="render"):
+        spec_path = os.path.join(tmp, "spec.json")
+        with open(spec_path, "w") as f:
+            json.dump(spec, f)
+        r = subprocess.run([sys.executable, SCRIPT, command, spec_path, "--out", os.path.join(tmp, "out"),
+                            "--words", os.path.join(tmp, "caps.json"), "--ffmpeg", FFMPEG, "--ffprobe", FFPROBE,
+                            "--transcribe-cmd", "off"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr[-800:])
+        return r.stdout
+
+    def test_grid_label_and_bed(self):
+        import audio_check
+        import cutplan
+        tmp = tempfile.mkdtemp(prefix="sts-grid-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        # A grey picture that gets lighter with time, so a jump in the source
+        # shows as a jump in level; a tone gated to digital silence 0.4 s of
+        # every second, like a stream behind a noise gate.
+        r = subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i",
+                            "color=c=gray:size=1920x1080:rate=30:duration=20,eq=brightness='t/40-0.25':eval=frame",
+                            "-f", "lavfi", "-i",
+                            "aevalsrc='0.3*sin(2*PI*440*t)*gt(mod(t,1),0.4)':sample_rate=48000:duration=20",
+                            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le",
+                            "-shortest", os.path.join(tmp, "main.mov")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr[-500:])
+        with open(os.path.join(tmp, "caps.json"), "w") as f:
+            json.dump([{"w": "one", "s": 0.05, "e": 0.3}, {"w": "two", "s": 0.4, "e": 0.7}], f)
+        spec = {"id": "a01-demo", "sources": {"main": "main.mov"}, "src": "main", "layout": "stack",
+                "bar": "Grid test", "facecam": [1500, 650, 300, 180], "bed": -55,
+                # lengths that are not whole frames, one at another speed
+                "segments": [{"in": 2.0, "out": 3.37}, {"in": 6.011, "out": 7.2, "speed": 1.1},
+                             {"in": 12.0, "out": 14.05}, {"in": 15.0, "out": 15.75, "speed": 0.9}],
+                # typed 0.1 s early and too short, as a hand-timed label is
+                "labels": [{"at": 1.26, "dur": 0.6, "text": "LABEL"}]}
+        out = os.path.join(tmp, "out")
+        self.render(tmp, spec)
+        with open(os.path.join(out, "shots.json")) as f:
+            shots = json.load(f)
+        cuts = cutplan.cut_frames(shots)
+        total = cuts[-1]
+        self.assertEqual(total, 41 + 32 + 61 + 25)            # each segment rounded down to whole frames
+
+        # 1. The cut is exactly as long as the plan, picture and sound: a
+        # shot that ran long or short would have been padded at the join.
+        base = os.path.join(out, "base.nut")
+        self.assertEqual(count(["-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames",
+                                "-of", "csv=p=0", base]), str(total))
+        pcm = subprocess.run([FFMPEG, "-v", "error", "-i", base, "-ac", "1", "-f", "s16le", "-"], capture_output=True).stdout
+        self.assertEqual(len(pcm) // 2, total * 1600)
+        with open(os.path.join(out, "metrics.json")) as f:
+            met = json.load(f)
+        self.assertEqual(met["planned_s"], round(total / 30.0, 3))
+        self.assertEqual(met["bed_dbfs"], -55)
+
+        # 2. The picture jumps on the planned frames and nowhere else.
+        frames = small_frames(os.path.join(out, "a01-demo.mp4"))
+        self.assertEqual(len(frames), total)
+        levels = [screen_level(fr) for fr in frames]
+        jumps = [i for i in range(1, total) if abs(levels[i] - levels[i - 1]) > 4]
+        self.assertEqual(jumps, [41, 73, 134])
+
+        # 3. The label starts on the frame of its cut and ends on the next cut.
+        self.assertEqual(met["labels"], [{"text": "LABEL", "at": round(41 / 30.0, 3), "end": round(73 / 30.0, 3),
+                                          "typed_at": 1.26, "typed_end": 1.86, "on_cuts": True}])
+        shown = [i for i in range(total) if red_pixels(frames[i]) > 40]
+        self.assertEqual(shown, list(range(41, 73)))
+
+        # 4. With the bed no pause is a hole; without it every gated pause is.
+        master = os.path.join(out, "a01-demo.mp4")
+        rms = audio_check.rms_windows(audio_check.pcm(FFMPEG, master, 48000), 48000)
+        self.assertEqual(audio_check.dropouts(rms), [])
+        quiet = sorted(rms)[:len(rms) // 5]
+        self.assertTrue(all(-58.0 < x < -52.0 for x in quiet), (quiet[0], quiet[-1]))       # about -55 dBFS
+        del spec["bed"]
+        self.render(tmp, spec, "finish")
+        rms = audio_check.rms_windows(audio_check.pcm(FFMPEG, master, 48000), 48000)
+        self.assertGreaterEqual(len(audio_check.dropouts(rms)), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

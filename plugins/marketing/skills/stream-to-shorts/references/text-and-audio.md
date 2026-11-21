@@ -25,7 +25,8 @@ Basis tags: [M] measured on reference shorts (a November 2026 sample of 15 outli
     - an empty timed edit removes the word.
     A hook variant carries its own `cap_edit`. `spec-format.md` has the full spec.
 12. After a fix, re-burn without transcribing again: `cut_short.py finish <spec.json> --out <dir>`. [C]
-13. Check the burned captions against an independent transcript of the master: `python3 <SKILL_DIR>/scripts/caption_check.py <dir>/burned.json <independent-words.json>`. The cutter writes `burned.json`, the words after the spec's fixes, next to the master. Every difference is either a fix or a note. Then compare the captions with the screen as well: a caption that repeats a slip of the tongue the picture contradicts is wrong (`checks.md`). [C]
+13. Check the burned captions against an independent transcript of the master: `python3 <SKILL_DIR>/scripts/caption_check.py <dir>/burned.json <independent-words.json>`. The cutter writes `burned.json`, the words after the spec's fixes, next to the master. Every difference is a question to settle, not yet a fix. Then compare the captions with the screen as well: a caption that repeats a slip of the tongue the picture contradicts is wrong (`checks.md`). [C]
+13a. Change a caption only on a transcript of the source recording, read with the sentence around it, where two models agree. Never on an isolated half-second, and never on a transcript that crosses an edit point. When the models split evenly, caption the reading that fits the picture, record it as a judgment and keep the source excerpt for a person to listen to. A second transcript is a guess from the sound too: in the source run 3 of 39 caption changes made after the independent check were wrong (`checks.md`, check 2). [C]
 14. Captions say what was said. A garbled line is cut from the clip, not captioned as a guess (`edit-rules.md`). [C]
 
 Example of a fix: the transcript hears "for tea" where the speaker said "40". A fix map entry `"tea": "40"` is wrong, because it changes every "tea" in the clip. A timed edit over the 0.2 s where the number is spoken is right.
@@ -45,7 +46,7 @@ Examples, made up: `MY TEST SUITE WENT RED` (a stake, 5 words). `THE BUILD FINIS
 ## Labels
 
 22. A label is a short on-picture note that says what a thing is: `AI-BUILT DEMO, NOT THE REAL GAME`, `40 MIN LATER`, `SAID ON STREAM`. [C]
-23. White text on a red box, 50 px, timed by start and duration in the spec. [C]
+23. White text on a red box, 50 px, timed by start and duration in the spec. A label covers its whole shot: the cutter starts it on the frame of the cut nearest to the typed start and ends it on the frame of a later cut, so it never sits over the picture before its own. Read `labels` in `metrics.json` to see where each one landed. [C]
 24. A label that is on screen at frame 0 counts toward the 7-word limit. [C]
 25. Use a label when the picture alone would mislead: an AI-built demo that looks like a commercial game, a price said on stream, two windows far apart in time. [C]
 
@@ -82,6 +83,8 @@ All text is burned into the master as an ASS subtitle file with libass. The titl
 40. A 50 ms fade at the very last frame stops a click on loop. It is not a fade-out. [C]
 41. Check the master: `python3 <SKILL_DIR>/scripts/audio_check.py <master> --words words.json`. It reports loudness, true peak, silences, speech gaps, clipped samples, dropouts and words whose audio dips because a cut sits too tight. [C]
 41a. No digital silence inside a clip. A jump cut, a noise gate or a separated voice stem can leave a hole with no room tone, and it plays as a glitch even when loudness is in range. The run had holes of 0.3 to 1.0 s that only an independent listen found. Lay room tone from the same recording under the whole clip, or loosen the cut, and use `gate` only where the noise is worse than the hole. [C]
+41b. A stream whose sound passed through a noise gate before it was recorded has digital silence in every pause, and no room tone anywhere in the recording to lay under it. Look for it first: run `audio_check.py` on a stretch of the source and read the dropout list. For such a stream set `"bed": -55` in the spec. The cutter then mixes quiet noise at that level (dBFS, RMS) under the whole clip after loudness and before the limiter; about -55 is low enough to stay under the voice and high enough that a pause reads as a room, and it keeps every pause above the -70 dBFS line the dropout check uses. Leave `bed` out for a recording that has its own room tone. [C]
+41c. No pause inside speech is longer than 0.35 s in the master. The tight cut leaves 0.3 s; 0.35 s is the cap, and `audio_check.py --words` marks anything over it. A filled pause still has to be short. [C]
 42. No music bed under speech. [C]
 43. Where music already sits under speech in the source (game menus, radio, a score, cutscenes), do one of three things: take the voice from a separated vocals stem for that span (for example with demucs) and say so in the clip notes; mute the span; or pick another window. [C]
 44. Check every window with `<SKILL_DIR>/scripts/music_check.py` and a listen. A tagger score is not a listen. In the run no clip had been listened to by a person when the schedule was built; record that as a gap, not a pass. [C]

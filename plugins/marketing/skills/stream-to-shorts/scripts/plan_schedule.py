@@ -186,7 +186,12 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
             raise PlanError("duplicate account key: %s" % a["key"])
         acc_by_key[a["key"]] = a
     ref_to_key = {str(a["ref"]): a["key"] for a in accounts if a.get("ref") is not None}
+    cap_names = set()
     for c in caps:
+        name = c.get("name")
+        if not isinstance(name, str) or not name.strip() or name in cap_names:
+            raise PlanError("every cap needs its own name (got %r)" % (name,))
+        cap_names.add(name)
         for k in c.get("accounts", []):
             if k not in acc_by_key:
                 raise PlanError("cap %s names unknown account %s" % (c.get("name"), k))

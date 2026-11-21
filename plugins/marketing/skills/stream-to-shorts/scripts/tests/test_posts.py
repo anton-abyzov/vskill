@@ -1205,5 +1205,18 @@ class Round4(Base):
             self.assertEqual(t.calls, [])
 
 
+class Round5(Base):
+    def test_a_cap_with_no_name_still_applies(self):
+        for name in ({}, {"name": ""}, {"name": None}, {"name": 0}, {"name": "plan"}):
+            plan = simple_plan(Round3.DOUBLED[:1])
+            plan["caps"] = [dict({"refs": ["REF_YT"], "max": 0, "window_hours": 24}, **name)]
+            t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", lambda p, b: (200, {"posts": []}))
+            t.on("POST", "/api/public/v1/posts", lambda p, b: (201, [{"postId": "new1"}]))
+            self.assertEqual(self.run_main(["create", self.write("plan.json", plan), "--go"], t, env_postiz()), 0)
+            self.assertIn("skip: cap", self.out, name)
+            self.assertIn("would be exceeded", self.out, name)
+            self.assertEqual(t.writes(), [], name)
+
+
 if __name__ == "__main__":
     unittest.main()

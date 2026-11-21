@@ -495,5 +495,18 @@ class Round4(unittest.TestCase):
             ps.plan(clips, accs, [], TZ, caps=[dict({"name": "c", "accounts": ["yt-main"]}, **cap)])
 
 
+class Round5(unittest.TestCase):
+    def test_every_cap_needs_its_own_name(self):
+        clips = [{"id": "a01-demo", "lead": "2026-12-01 10:00"}]
+        accs = [{"key": "yt-main", "platform": "youtube"}]
+        cap = {"accounts": ["yt-main"], "max": 3, "window_hours": 24}
+        for caps in ([dict(cap)], [dict(cap, name="")], [dict(cap, name="  ")], [dict(cap, name=7)],
+                     [dict(cap, name="a"), dict(cap, name="a")]):
+            with self.assertRaises(ps.PlanError, msg=caps):
+                ps.plan(clips, accs, [], TZ, caps=caps)
+        r = ps.plan(clips, accs, [], TZ, caps=[dict(cap, name="a"), dict(cap, name="b", max=1)])
+        self.assertEqual(sorted(r["cap_report"]), ["a", "b"])
+
+
 if __name__ == "__main__":
     unittest.main()

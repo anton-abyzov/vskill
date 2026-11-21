@@ -112,7 +112,7 @@ A list of accounts, or `{"accounts": [...], "caps": [...]}`. Build it from the r
 | `require_tags`, `exclude_tags` | Tag routing |
 | `settings` | Platform settings copied to each post |
 
-A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window; `window_hours` is a number above 0 and `max` is a whole number, 0 or more. In the plan each cap also carries `refs`, the scheduler ids of its accounts, which `posts.py` uses to check the cap against the live queue.
+A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window; each cap has its own `name`, `window_hours` is a number above 0 and `max` is a whole number, 0 or more. In the plan each cap also carries `refs`, the scheduler ids of its accounts, which `posts.py` uses to check the cap against the live queue.
 
 ### busy.json
 

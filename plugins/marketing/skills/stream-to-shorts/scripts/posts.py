@@ -658,10 +658,10 @@ def cmd_create(ctx, a):
                 continue
             ts = [x for ref in refs for x in times.get(ref, [])]
             if not window_ok(ts, t, dt.timedelta(hours=float(cap["window_hours"])), int(cap["max"])):
-                over = cap.get("name")
+                over = cap.get("name") or "(unnamed)"     # a cap with no name still applies
                 break
-        if over:
-            ctx.say(tag + " skip: cap %s would be exceeded" % over)
+        if over is not None:
+            ctx.say(tag + " skip: cap %s would be exceeded" % scalar(over))
             continue
         n += 1
         if n > a.only:

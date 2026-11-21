@@ -40,7 +40,7 @@ Basis tags: [M] measured on reference shorts (a November 2026 sample of 15 outli
 |---|---|---|---|
 | 8 | Something meaningful changes | at least every 1.5 s | [M] AI-coding visual shot median 0.70 s |
 | 9 | Max shot length in the cutter | 1.45 s, alternate shots punched in 1.08x | [C], what the run used |
-| 10 | Pauses inside speech | cut to 0.3 s | [C] |
+| 10 | Pauses inside speech | cut to 0.3 s, never over 0.35 s in the master | [C] |
 | 11 | Filler words | cut | [C] |
 | 12 | Silence ratio, 0.3 s floor, -30 dB | 0.03 or less for talk; 0.10 or less when game action carries the gap | [M] AI-coding median 0.016 (max 0.038); talk-driven gaming 0.000 to 0.085 |
 | 13 | Spoken words a minute, after jump cuts | 145 or more for talk; 120 or more for gameplay | [M] gaming 110 to 180; [C] talk floor, because jump cuts remove gaps, not syllables |
@@ -64,7 +64,7 @@ Basis tags: [M] measured on reference shorts (a November 2026 sample of 15 outli
 These are checked on the master. The audio chain that meets them is in `text-and-audio.md`.
 
 - Loudness -14 LUFS integrated, plus or minus 1; true peak -1 dBFS or lower; LRA 11 or less after loudnorm. [M] most reference shorts measure near -14 LUFS; [V] -14 is the common platform playback level.
-- No music bed under speech. [C]
+- No music bed under speech. The room-tone `bed` is quiet noise at about -55 dBFS, not music (see `text-and-audio.md`, rule 41b). [C]
 
 ## Cut mechanics
 
@@ -74,7 +74,9 @@ These are checked on the master. The audio chain that meets them is in `text-and
 27. When windows are more than 10 minutes apart and the gap matters to the story, show a time-gap label, for example `40 MIN LATER`. [C]
 28. Never join moments from different streams into one claim. [C]
 29. Join shots with the concat filter, not the concat demuxer, with 10 ms audio fades at each cut, so cut points do not click. [C]
-30. Cut a garbled line. Do not caption a guess of what was said. [C]
+29a. Every shot is a whole number of frames long (30 a second), picture and sound alike. A shot whose length falls between two frames gets a picture a fraction of a frame longer than its sound; the join fills the difference with digital silence, and every cut after it lands later than planned, so labels and mapped captions drift off their shots. The cutter rounds each span down to whole frames, never up into a dropped range or past its `out`, and renders each shot's picture and sound to exactly that length. A source that is not at 30 frames a second, or a slowed shot, runs out of frames before the count is reached; the cutter puts the picture on the 30-frame grid before it crops or scales, holds the last frame for any that is missing, and cuts picture and sound at the count, so no frame of a shot is dropped and the sound is never cut short with the picture. [C], from the source run.
+29b. A label covers its whole shot, from the frame of the cut to the frame of the next cut. [C]
+30. Cut a garbled line. Do not caption a guess of what was said. A line a listener hears clearly and two models read differently is not garbled: it is a judgment (`text-and-audio.md`, rule 13a). [C]
 31. If the picture runs in source order under audio that is left unchanged, the sounds under those shots are not from the same second. Avoid it, or disclose it in the clip notes. [C]
 32. Keep only lines that add new information. A repeated sentence, a false start or a line that explains a feature goes. [C]
 
@@ -84,10 +86,14 @@ These are checked on the master. The audio chain that meets them is in `text-and
 
 - A segment marked tight is cut on its word timings: words are grouped wherever the gap exceeds 0.3 s, and each group keeps half the gap on each side, so about 0.3 s of pause is left at every join.
 - The cutter drops "uh" and "um" on its own. "So" or "okay" at the start of a line, repeated words and false starts are cut by hand, with drop ranges in the spec.
-- Each span is split into equal shots no longer than the max shot length, and every second shot is punched in.
+- Each span is rounded down to whole frames and split into shots of about the max shot length, each a whole number of frames (a shot can be one frame over); every second shot is punched in. The max shot is a length on screen: a slowed or sped-up span is split by its length after the speed change. Under one frame (33 ms) is lost at the end of a span. A segment that starts where the one before it ended, on the same picture and sound, carries on from where that one really ended, so nothing is skipped between them.
+- Labels are moved onto cuts (rule 29b): the start to the nearest cut, the end to a later cut. A label typed at or past the end of the cut is left out with a note (a variant can be shorter than the cut its labels were typed for).
+- A shot that reads past the end of its source still renders to its planned length, on a held last frame over silence. The cutter prints a WARN naming the shot; fix its `in` and `out`. A shot that starts past the end, or within 0.1 s of it, may have no frame to show and stops the run before anything is encoded.
+- A cut that measures louder than 0 LUFS (a clipped source, or too much `vol`) still renders, with a WARN: lower `vol` and listen to the master. A cut with under half a second of sound stops with a message, because its loudness cannot be measured.
+- The cutter needs an ffmpeg with the `fps`, `tpad` and `trim` filters. It was run on ffmpeg 7.1 only; older builds are untested.
 - The hook-line exception (rule 26) and picture from another time (rule 31) are spec fields. `spec-format.md` names them.
 
-`cut_short.py render <spec.json> --out <dir>` writes the master, `shots.json`, `words.json` and `metrics.json`. `metrics.json` carries length, longest shot, cuts a minute, first-word time, words a minute and speech gaps over 0.6 s.
+`cut_short.py render <spec.json> --out <dir>` writes the master, `shots.json`, `words.json` and `metrics.json`. `metrics.json` carries length (counted in frames of the cut), the planned length (`planned_s`; the two differ only when a shot is off the frame grid, and the cutter warns), longest shot, cuts a minute, first-word time, words a minute, speech gaps over 0.6 s and where each label landed.
 
 ## Measuring a master
 

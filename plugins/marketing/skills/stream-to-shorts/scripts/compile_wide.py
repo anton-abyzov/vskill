@@ -89,18 +89,19 @@ def wide_video_filter(shot, screen, face, wide=WIDE):
     fx, fy, fs = face
     SW, OW, OH, PW = wide["screen_w"], wide["width"], wide["height"], wide["panel_w"]
     gin = "g_in" in shot
-    sp = shot.get("speed", 1.0)
-    return (("[1:v]setpts=PTS-STARTPTS[g]" if gin else "[0:v]setpts=PTS-STARTPTS,split=2[g][f]") + ";"
+    grid = cutplan.shot_grid(shot)      # before crop and scale: see cutplan.shot_grid
+    return ((("[1:v]setpts=PTS-STARTPTS%s[g]" if gin else "[0:v]setpts=PTS-STARTPTS%s,split=2[g][f]") % grid) + ";"
             + "[g]crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos,pad=%d:%d:0:0:white[t];" % (w, h, x, y, SW, OH, OW, OH)
-            + ("[0:v]setpts=PTS-STARTPTS," if gin else "[f]")
+            + (("[0:v]setpts=PTS-STARTPTS%s," % grid) if gin else "[f]")
             + "crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos[ff];" % (fs, fs, fx, fy, PW, PW)
             + "[t][ff]overlay=%d:0,setsar=1[v]" % SW
-            + ((";[v]setpts=PTS/%s[v2]" % sp) if sp != 1 else ";[v]null[v2]"))
+            + cutplan.SHOT_VIDEO_OUT)
 
 
 def build_wide_ass(marks, words, mark_specs=None, lang=None, wide=WIDE):
     """ASS for the compilation. marks: [(t0, t1, bar)]. With lang, each moment's
-    translated bar and caps (offset to the moment's start) replace the words."""
+    translated bar and caps (offset to the moment's start) replace the words.
+    A moment's bar and number change on the frame of the cut between moments."""
     OW, OH, SW, PW = wide["width"], wide["height"], wide["screen_w"], wide["panel_w"]
     font = (mark_specs[0].get("font") if mark_specs else None) or captions.DEFAULT_FONT
     head = """[Script Info]
@@ -120,13 +121,16 @@ Style: Num,{F},30,&H00FFFFFF,&H00FFFFFF,&H001E1EE6,&H001E1EE6,0,0,0,0,100,100,0,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """.format(OW=OW, OH=OH, F=font)
     A = captions.ass_time
+
+    def C(t):   # a moment starts and ends on a cut
+        return captions.cut_time(int(round(t * cutplan.FPS)))
     ev = []
     for i, (a, b, bar) in enumerate(marks):
         if lang and mark_specs:
             bar = captions.translation(mark_specs[i], lang).get("bar", bar).replace("\n", " ")
-        ev.append("Dialogue: 5,%s,%s,Bar,,0,0,0,,{\\pos(%d,%d)}" % (A(a), A(b), SW + PW // 2, wide["bar_y"])
+        ev.append("Dialogue: 5,%s,%s,Bar,,0,0,0,,{\\pos(%d,%d)}" % (C(a), C(b), SW + PW // 2, wide["bar_y"])
                   + "\\N".join(captions.ass_text(x) for x in textwrap.wrap(bar.upper(), wide["bar_wrap"])))
-        ev.append("Dialogue: 5,%s,%s,Num,,0,0,0,,{\\pos(%d,%d)}%d / %d" % (A(a), A(b), SW + PW // 2, wide["num_y"], i + 1, len(marks)))
+        ev.append("Dialogue: 5,%s,%s,Num,,0,0,0,,{\\pos(%d,%d)}%d / %d" % (C(a), C(b), SW + PW // 2, wide["num_y"], i + 1, len(marks)))
     if lang and mark_specs:
         for (a, b, _), spec in zip(marks, mark_specs):
             for t0, t1, txt in captions.translation(spec, lang).get("caps", []):
@@ -182,11 +186,14 @@ def main(argv=None):
         cut_short.preflight_ass(ff, env)
         parts, marks, mapped, t = [], [], [], 0.0
         mapped_ok = True
+        beds = [s["bed"] for s in specs if s.get("bed") is not None]
         for spec in specs:
             transcripts = cut_short.Transcripts(spec)
             shots = cut_short.plan_shots(spec, None, transcripts)
             t0 = t
             sizes = {}
+            for line in cut_short.past_end_warnings(spec, shots, fp):
+                print(line)
             for s in shots:
                 src = spec["sources"][s["src"]]
                 if s["src"] not in sizes:
@@ -200,17 +207,17 @@ def main(argv=None):
                 af = cutplan.shot_audio_filter(s)
                 ain = []
                 if "g_in" in s:
-                    ain = ["-ss", "%.3f" % s["g_in"], "-t", "%.3f" % d, "-i", src]
+                    ain = ["-ss", "%.3f" % s["g_in"], "-t", "%.3f" % cutplan.read_length(s), "-i", src]
                 elif "a_in" in s:
-                    ain = ["-ss", "%.3f" % s["a_in"], "-t", "%.3f" % d, "-i", spec["sources"][s.get("a_src", s["src"])]]
+                    ain = ["-ss", "%.3f" % s["a_in"], "-t", "%.3f" % cutplan.read_length(s), "-i", spec["sources"][s.get("a_src", s["src"])]]
                 p = os.path.join(od, "p%03d.nut" % len(parts))
-                cut_short.run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % d, "-i", src] + ain
-                              + ["-filter_complex", g + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", "30",
-                                 "-c:v", "libx264", "-crf", "14", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-                                 "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
+                cut_short.run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % cutplan.read_length(s), "-i", src] + ain
+                              + ["-filter_complex", g + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", str(cutplan.FPS)]
+                              + cut_short.frame_limit(s) + cut_short.INTERMEDIATE
+                              + ["-crf", "14", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
                               "ffmpeg part %d" % len(parts), env=env)
                 parts.append(p)
-                t += d / s.get("speed", 1.0)
+                t += s["frames"] / float(cutplan.FPS) if "frames" in s else d / s.get("speed", 1.0)
             marks.append((round(t0, 3), round(t, 3), spec["bar"].replace("\n", " ")))
             keys = set(cutplan.audio_source(s)[0] for s in shots)
             if all(transcripts.has(k) for k in keys):
@@ -226,8 +233,8 @@ def main(argv=None):
             ins += ["-i", p]
         cut_short.run([ff, "-v", "error", "-y"] + ins
                       + ["-filter_complex", "".join("[%d:v][%d:a]" % (i, i) for i in range(len(parts))) + "concat=n=%d:v=1:a=1[v][a]" % len(parts),
-                         "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-crf", "14", "-preset", "veryfast",
-                         "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-f", "nut", base], "ffmpeg concat", env=env)
+                         "-map", "[v]", "-map", "[a]"] + cut_short.INTERMEDIATE
+                      + ["-crf", "14", "-c:a", "pcm_s16le", "-f", "nut", base], "ffmpeg concat", env=env)
         for p in parts:
             os.remove(p)
         words, how = None, None
@@ -266,11 +273,13 @@ def main(argv=None):
             j = json.loads(m[m.rfind("{"):m.rfind("}") + 1])
         except ValueError:
             raise CutError("loudnorm first pass gave no measurement")
-        ln = ("loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=false"
-              % (j["input_i"], j["input_tp"], j["input_lra"], j["input_thresh"], j["target_offset"]))
-        cut_short.run([ff, "-v", "error", "-y", "-i", "base.nut", "-vf", "ass=cap.ass",
-                       "-af", "%s,%s,alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.1" % (pre, ln, dur - 0.1),
-                       "-c:v", "libx264", "-profile:v", "high", "-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p",
+        ln = cut_short.loudnorm_pass2(j, dur)
+        # The compilation gets a room-tone bed when one of its specs asks for one.
+        extra, audio = cut_short.audio_args(ff, max(beds) if beds else None, "%s,%s" % (pre, ln),
+                                            "alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.1" % max(0.0, dur - 0.1),
+                                            dur, env)
+        cut_short.run([ff, "-v", "error", "-y", "-i", "base.nut"] + extra + ["-vf", "ass=cap.ass"] + audio
+                      + ["-c:v", "libx264", "-profile:v", "high", "-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p",
                        "-r", "30", "-g", "60", "-c:a", "aac", "-b:a", "256k", "-ar", "48000",
                        "-metadata", "title=%s" % args.title, "-movflags", "+faststart", out_name],
                       "ffmpeg finish", cwd=od, env=env)

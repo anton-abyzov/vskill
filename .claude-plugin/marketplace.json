@@ -22,9 +22,9 @@
     },
     {
       "name": "marketing",
-      "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, Blotato batch scheduling (X/TikTok/IG/LinkedIn/YT/FB/Threads), Slack messaging, Kie.ai image/video generation, and budgeted Apify data gathering",
+      "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, Blotato batch scheduling (X/TikTok/IG/LinkedIn/YT/FB/Threads), Slack messaging, Kie.ai image/video generation, budgeted Apify data gathering, and livestream-to-shorts production",
       "source": "./plugins/marketing",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "category": "marketing"
     },
     {

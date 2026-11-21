@@ -76,6 +76,41 @@
         { "id": "a1", "text": "Response routes to video-pipeline or hyperframes-best-practices", "type": "boolean" },
         { "id": "a2", "text": "Response does not remove pauses or fillers inside a take", "type": "boolean" }
       ]
+    },
+    {
+      "id": 8,
+      "name": "gated stream leaves holes in every pause",
+      "prompt": "In my stream clips the sound drops out completely between sentences, like the audio cuts off for a moment. The mic on that stream had a noise gate on. Loudness is fine. What do I change?",
+      "expected_output": "Response says a gated stream has digital silence in every pause and no room tone to borrow, sets a bed of about -55 dBFS in the cut spec, keeps pauses at 0.35 s or less, and checks again with audio_check.py.",
+      "assertions": [
+        { "id": "a1", "text": "Response sets \"bed\" in the cut spec at about -55 dBFS, or lays a room-tone bed at about that level", "type": "boolean" },
+        { "id": "a2", "text": "Response keeps pauses inside speech at 0.35 s or less", "type": "boolean" },
+        { "id": "a3", "text": "Response re-runs audio_check.py and reads its dropout list", "type": "boolean" },
+        { "id": "a4", "text": "Response does not treat an in-range loudness number as proof the audio is fine", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "a second transcript disagrees with a caption",
+      "prompt": "The reviewer's transcript of the finished master says 'system' where my caption says 'assistant'. The word is right after a jump cut. Should I change the caption?",
+      "expected_output": "Response does not change the caption on that evidence. It transcribes the source recording over the whole sentence, changes the caption only if two models agree there, and when they split evenly captions the reading that fits the picture, records it as a judgment and keeps the source excerpt.",
+      "assertions": [
+        { "id": "a1", "text": "Response does not change the caption on the master transcript alone", "type": "boolean" },
+        { "id": "a2", "text": "Response checks the sentence in the source recording, with the words around it", "type": "boolean" },
+        { "id": "a3", "text": "Response requires two models to agree before a caption changes", "type": "boolean" },
+        { "id": "a4", "text": "Response says a transcript across an edit point, or of an isolated half-second, is not evidence", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "media swapped on queued posts",
+      "prompt": "I re-rendered three masters and swapped the files on their queued posts. The scheduler answered 201 every time. Are we done?",
+      "expected_output": "Response says the status proves nothing about the file, downloads what each scheduler holds for every queued post and compares its hash with the final master, and records how many matched.",
+      "assertions": [
+        { "id": "a1", "text": "Response downloads the file each scheduler holds, or names where to get it (the Postiz preview page upload URL, Blotato mediaUrls)", "type": "boolean" },
+        { "id": "a2", "text": "Response compares a hash of that file with the final master", "type": "boolean" },
+        { "id": "a3", "text": "Response does not accept the 201 as proof", "type": "boolean" }
+      ]
     }
   ]
 }

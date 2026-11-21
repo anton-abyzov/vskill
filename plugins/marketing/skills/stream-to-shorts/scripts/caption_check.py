@@ -3,7 +3,7 @@
 
 Usage:
     python3 caption_check.py <caption-words.json> <independent-words.json>
-                             [--max-ratio 0.08] [--json]
+                             [--shots shots.json] [--max-ratio 0.08] [--json]
 
 caption-words.json holds the words that were burned into the picture.
 independent-words.json is a second transcript of the finished master's audio,
@@ -24,17 +24,34 @@ A difference that holds a number or a capitalised word (a name, a brand, a
 model) is marked CHECK BY EAR: transcripts disagree most on exactly those, so
 a person settles them by listening.
 
+A difference is a question, not a fix. The independent transcript is a guess
+from the sound as well, and it heard a short clip made of pieces. Change a
+caption only when two models agree on the sentence in the source recording,
+read with the words around it. Never change one from a burst of a few words,
+or from a transcript that runs across a cut: there the model heard an ending
+and a beginning that were never said together.
+
+With --shots (the cutter's shots.json) each difference also gets the place in
+the source recording to listen at, and AT A CUT when the sound jumps within
+half a second of it.
+
 The mismatch ratio is the number of words in differences over the number of
 independent words. Exit 1 when it is over --max-ratio, 2 on an error.
 """
 import argparse
 import difflib
 import json
+import math
 import os
 import re
 import sys
 
 _PUNCT = re.compile(r"[^\w]+", re.UNICODE)
+
+NOTE = ("A difference is a question, not a fix: the second transcript is a guess from the sound too. "
+        "Change a caption only when two models agree on the sentence in the source recording, with the "
+        "words around it; never from a few isolated words or across a cut.")
+CUT_NEAR = 0.5      # a difference this close to a jump in the sound is marked AT A CUT
 
 
 def norm(word):
@@ -118,8 +135,71 @@ def compare(caption_words, independent_words):
     return diffs, ratio
 
 
+def sound_place(shot):
+    """(source key, source time) where a shot's sound starts. Same rule as
+    cutplan.audio_source: the sound follows "a_in" unless the shot has "g_in"."""
+    if "a_in" in shot and "g_in" not in shot:
+        return shot.get("a_src", shot.get("src")), shot["a_in"]
+    return shot.get("src"), shot["in"]
+
+
+def check_shots(shots):
+    """Raise ValueError unless every shot has what the source place needs:
+    a source key and finite numbers for its times."""
+    def num(v):
+        return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+    for i, s in enumerate(shots):
+        if not isinstance(s, dict):
+            raise ValueError("shot %d is not an object" % i)
+        for k in ("in", "out", "t0", "t1"):
+            if not num(s.get(k)):
+                raise ValueError("shot %d needs a number for %r" % (i, k))
+        for k in ("a_in", "g_in", "speed"):
+            if k in s and not num(s[k]):
+                raise ValueError("shot %d: %r is not a number" % (i, k))
+        if s.get("speed", 1.0) <= 0:
+            raise ValueError("shot %d: \"speed\" must be above 0" % i)
+        for k in ("src", "a_src"):
+            if (k == "src" or k in s) and (not isinstance(s.get(k), str) or not s[k]):
+                raise ValueError("shot %d needs a source key in %r" % (i, k))
+
+
+def edits(shots):
+    """Output times where the sound jumps: the joins between shots that do not
+    carry on from each other in the source. Pure."""
+    out = []
+    for a, b in zip(shots, shots[1:]):
+        ka, ta = sound_place(a)
+        kb, tb = sound_place(b)
+        if ka != kb or abs(ta + (a["out"] - a["in"]) - tb) > 0.02:
+            out.append(b["t0"])
+    return out
+
+
+def locate(shots, t):
+    """{"key", "time"} in the source for output time t, or None outside the cut. Pure."""
+    for i, s in enumerate(shots):
+        if s["t0"] <= t < s["t1"] or (i == len(shots) - 1 and t >= s["t0"]):
+            key, start = sound_place(s)
+            return {"key": key, "time": round(start + (t - s["t0"]) * s.get("speed", 1.0), 2)}
+    return None
+
+
+def place_diffs(diffs, shots, near=CUT_NEAR):
+    """Add "source" and "at_cut" to each difference from the cutter's shot list. Pure."""
+    jumps = edits(shots)
+    for d in diffs:
+        d["source"] = locate(shots, d["time"])
+        d["at_cut"] = any(abs(d["time"] - j) <= near for j in jumps)
+    return diffs
+
+
 def format_diff(d):
     ear = "  CHECK BY EAR" if d["check_by_ear"] else ""
+    if d.get("source"):
+        ear += "  source %s@%.2f" % (d["source"]["key"], d["source"]["time"])
+    if d.get("at_cut"):
+        ear += "  AT A CUT"
     if d["kind"] == "replaced":
         body = "captions %r, spoken %r" % (d["captions"], d["spoken"])
     elif d["kind"] == "missing from captions":
@@ -133,6 +213,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Burned captions against an independent transcript.")
     ap.add_argument("captions", help="words burned as captions (JSON)")
     ap.add_argument("independent", help="independent transcript of the master (JSON)")
+    ap.add_argument("--shots", help="the cutter's shots.json: adds the source time of each difference")
     ap.add_argument("--max-ratio", type=float, default=0.08)
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
@@ -141,25 +222,36 @@ def main(argv=None):
             cap = load_words(json.load(fh))
         with open(args.independent, encoding="utf-8") as fh:
             ind = load_words(json.load(fh))
-    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        shots = None
+        if args.shots:
+            with open(args.shots, encoding="utf-8") as fh:
+                shots = json.load(fh)
+            if not isinstance(shots, list) or not shots:
+                raise ValueError("%s holds no shots" % os.path.basename(args.shots))
+            check_shots(shots)
+    except (OSError, ValueError, TypeError, AttributeError, KeyError) as exc:
         print("caption_check: cannot read word files: %s" % exc, file=sys.stderr)
         return 2
     if not ind:
         print("caption_check: the independent transcript has no words", file=sys.stderr)
         return 2
     diffs, ratio = compare(cap, ind)
+    if shots:
+        place_diffs(diffs, shots)
     over = ratio > args.max_ratio
     if args.json:
         print(json.dumps({"captions": os.path.basename(args.captions),
                           "independent": os.path.basename(args.independent),
                           "caption_words": len(cap), "independent_words": len(ind),
                           "ratio": round(ratio, 3), "max_ratio": args.max_ratio,
-                          "ok": not over, "diffs": diffs}, indent=1, ensure_ascii=False))
+                          "ok": not over, "diffs": diffs, "note": NOTE}, indent=1, ensure_ascii=False))
     else:
         for d in diffs:
             print(format_diff(d))
         print("%d differences, mismatch ratio %.3f (max %.3f): %s" % (
             len(diffs), ratio, args.max_ratio, "FAIL" if over else "PASS"))
+        if diffs:
+            print(NOTE)
     return 1 if over else 0
 
 

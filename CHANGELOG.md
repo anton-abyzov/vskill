@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Marketing plugin 1.7.0: `stream-to-shorts` skill, which turns a long livestream into fast vertical shorts. It ships scripts for the cut, captions, layout, privacy, audio and caption checks, per-platform exports, a schedule planner and a post helper that redacts credentials. Install it with `vskill install anton-abyzov/vskill/stream-to-shorts`.
+
 ## [1.2.18] - 2026-11-14
 
 ### Fixed

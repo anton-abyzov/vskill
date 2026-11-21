@@ -262,7 +262,7 @@ class Round3(unittest.TestCase):
         shots = expand_shots(spec, words_for=words_for)
         self.assertEqual(asked, [("mic", 500.0, 510.0)])
         self.assertAlmostEqual(shots[0]["in"], 102.9)                 # the word at 503.0 in sound time
-        self.assertAlmostEqual(shots[-1]["out"], 104.05)
+        self.assertAlmostEqual(shots[-1]["out"], 104.033)             # 104.05 less the part of a frame
         for s in shots:
             self.assertAlmostEqual(s["a_in"] - s["in"], 400.0)        # sound and picture stay 400 s apart
 
@@ -284,15 +284,16 @@ class Round3(unittest.TestCase):
         spec = {"src": "main", "segments": [{"in": 100.0, "out": 110.0, "a_in": 500.0, "tight": True, "still": True,
                                              "drop": [[502.5, 504.0]]}]}
         shots = expand_shots(spec, words_for=words_for)
-        self.assertEqual([(s["in"], s["out"]) for s in shots], [(100.9, 101.45), (104.85, 105.45)])
+        self.assertEqual([(s["in"], s["out"]) for s in shots], [(100.9, 101.433), (104.85, 105.45)])   # whole frames
 
     def test_tight_without_a_in_is_unchanged(self):
         def words_for(key, a, b):
             return words_in_window([w("one", 11.0, 11.3), w("two", 13.0, 13.4)], a, b)
         seg = {"in": 10.0, "out": 20.0, "tight": True, "still": True}
         shots = expand_shots({"src": "main", "segments": [seg]}, words_for=words_for)
-        self.assertEqual([(s["in"], s["out"]) for s in shots],
-                         tight_spans(seg, words_for("main", 10.0, 20.0)))
+        spans = tight_spans(seg, words_for("main", 10.0, 20.0))
+        self.assertEqual(spans, [(10.9, 11.45), (12.85, 13.55)])
+        self.assertEqual([(s["in"], s["out"]) for s in shots], [(10.9, 11.433), (12.85, 13.55)])       # whole frames
 
     def test_drop_that_covers_every_word_removes_the_speech(self):
         seg = {"in": 10.0, "out": 12.0, "tight": True, "drop": [[10.0, 12.0]]}

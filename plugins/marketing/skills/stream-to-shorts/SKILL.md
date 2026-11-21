@@ -196,7 +196,8 @@ These apply when the `studio-code` tools are present.
 
 - The screen window is set by hand per segment from a contact sheet. Nothing tracks the action.
 - `fill_check.py`, the privacy flags and the music score are hints. A person or a second model still looks, reads and listens.
-- `posts.py` is a port of the scheduler calls that ran in the source run, tested here against a fake transport only. Dry-run it against your own scheduler before the first `--go`.
+- `posts.py` is a port of the scheduler calls that ran in the source run, tested here against a fake transport only. Dry-run it against your own scheduler before the first `--go`. It updates or deletes a post only when the scheduler's lookup reports state `QUEUE` (the source run's scheduler did, on every update); the id field of a Blotato create response is unconfirmed, so a Blotato delete may find nothing and skip.
+- Redaction errs toward masking: a line such as `token: expired` prints as `token: [redacted]`. The HTTP status is always printed.
 - The retention log is filled by hand from each platform's analytics screen.
 
 ## Done when

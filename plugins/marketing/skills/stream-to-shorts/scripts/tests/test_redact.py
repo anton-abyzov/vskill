@@ -232,7 +232,7 @@ class Round2(unittest.TestCase):
         self.assertNotIn("lang=en", out)
 
     def test_host_names_and_file_names_are_not_token_shapes(self):
-        for text in ("postiz-env.eu-central-1.elasticbeanstalk.com",
+        for text in ("postiz-env.eu-central-1.elasticbeanstalk.example.invalid",
                      "stream-2026-11-20-highlight-clip-03-vertical-final-v2-take-7.mp4"):
             self.assertEqual(redact_text(text), text)
         self.assertEqual(redact_text(JWT), MASK)
@@ -257,7 +257,7 @@ class Round2(unittest.TestCase):
 
     def test_ident_keeps_ids_exact_and_masks_only_known_values(self):
         hex48 = "0123456789abcdef" * 3
-        host = "postiz-env.eu-central-1.elasticbeanstalk.com"
+        host = "postiz-env.eu-central-1.elasticbeanstalk.example.invalid"
         self.assertEqual(redact_mod.ident(hex48), hex48)
         self.assertEqual(redact_mod.ident(host), host)
         self.assertEqual(redact_mod.ident(7), 7)

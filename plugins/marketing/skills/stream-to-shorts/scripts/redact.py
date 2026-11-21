@@ -64,8 +64,7 @@ def _variants(v):
     out = {v, urllib.parse.quote(v, safe=""), urllib.parse.quote_plus(v),
            json.dumps(v)[1:-1], json.dumps(v, ensure_ascii=False)[1:-1]}
     b = v.encode("utf-8")
-    out.add(base64.b64encode(b).decode("ascii"))
-    out.add(base64.b64encode(b).decode("ascii").rstrip("="))
+    out.add(base64.b64encode(b).decode("ascii").rstrip("="))      # matches with or without padding
     out.add(base64.urlsafe_b64encode(b).decode("ascii").rstrip("="))
     return {x for x in out if len(x) >= 4}
 

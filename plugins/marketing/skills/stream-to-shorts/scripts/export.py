@@ -262,6 +262,10 @@ def main(argv=None):
     except ValueError as exc:
         print("export: %s" % exc, file=sys.stderr)
         return 2
+    mx_x = preset.get("max_seconds_x")
+    if mx_x and info["duration"] > mx_x + 0.05:
+        print("export: note: %.1f s is over the %d s limit of X; this file is for the other platforms %s serves"
+              % (info["duration"], mx_x, pid), file=sys.stderr)
     if args.dry_run:
         for c in cmds:
             print(" ".join(shlex.quote(x) for x in c))

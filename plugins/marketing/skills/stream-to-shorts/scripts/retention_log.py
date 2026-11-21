@@ -5,11 +5,15 @@ Usage:
   retention_log.py init <plan.json> <log.csv>
       One row per planned post. Existing rows (same clip id and account) are
       kept as they are; only new rows are added.
-  retention_log.py decide <log.csv> --baseline-views N [--min-plays 300]
-      [--min-diff 8] [--plan plan.json]
+  retention_log.py decide <log.csv> --baseline-views N [--account KEY]
+      [--min-plays 300] [--min-diff 8] [--plan plan.json]
       One decision per clip, a diagnosis from the steepest drop, the release
       call for held alternate openings (needs --plan, which links a variant to
       its base), A/B calls, and the format review.
+
+A baseline belongs to one account: run decide once per account with
+--account and that account's baseline. Without --account every row is read
+against the one number.
 
 Rules (views against the channel's baseline views per short):
   breakout   views >= 10 x baseline and viewed vs swiped >= 70
@@ -200,8 +204,15 @@ def format_review(rows):
     return "format review: median viewed vs swiped %g over %d YouTube reads: no change" % (med, len(yt))
 
 
-def decide(rows, baseline, plan=None, min_plays=300, min_diff=8):
-    """Return the decision lines for a log."""
+def decide(rows, baseline, plan=None, min_plays=300, min_diff=8, account=None):
+    """Return the decision lines for a log. With account, verdicts are read
+    from that account's rows only; where a clip already ran still comes from
+    every row."""
+    all_by_clip = {}
+    for r in rows:
+        all_by_clip.setdefault(r.get("clip id"), []).append(r)
+    if account:
+        rows = [r for r in rows if r.get("account") == account]
     by_clip = {}
     for r in rows:
         by_clip.setdefault(r.get("clip id"), []).append(r)
@@ -222,7 +233,7 @@ def decide(rows, baseline, plan=None, min_plays=300, min_diff=8):
                 accounts.append(p["account"])
         pairs = [(h["clip"], h["base"]) for h in plan.get("held", [])]
         for v, b in pairs:
-            lines.append(release_call(v, b, by_clip.get(b, []), verdicts.get(b, "no read yet"), accounts))
+            lines.append(release_call(v, b, all_by_clip.get(b, []), verdicts.get(b, "no read yet"), accounts))
         released = sorted({(p["clip"], p["variant_of"]) for p in plan.get("posts", []) if p.get("variant_of")})
         for v, b in pairs + released:
             for rb in by_clip.get(b, []):
@@ -253,6 +264,7 @@ def main(argv=None):
     s.add_argument("--min-plays", type=int, default=300)
     s.add_argument("--min-diff", type=float, default=8)
     s.add_argument("--plan")
+    s.add_argument("--account", help="read only this account's rows")
     a = ap.parse_args(argv)
     if not a.cmd:
         print("retention_log: a command is required (init or decide)", file=sys.stderr)
@@ -273,11 +285,14 @@ def main(argv=None):
             print("retention_log: no such log: %s" % a.log, file=sys.stderr)
             return 1
         rows, _ = read_log(a.log)
+        if a.account and not any(r.get("account") == a.account for r in rows):
+            print("retention_log: no rows for account %s" % a.account, file=sys.stderr)
+            return 1
         plan = None
         if a.plan:
             with open(a.plan, encoding="utf-8") as f:
                 plan = json.load(f)
-        for line in decide(rows, a.baseline_views, plan, a.min_plays, a.min_diff):
+        for line in decide(rows, a.baseline_views, plan, a.min_plays, a.min_diff, a.account):
             print(line)
         return 0
     except (OSError, ValueError, KeyError) as e:

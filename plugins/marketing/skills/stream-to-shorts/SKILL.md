@@ -35,7 +35,7 @@ Work in this order. A stage is done when its file exists.
 
 Keep everything for one stream in `shorts/<source-id>/`, with `batch.json` as the record: one entry per clip, keyed by source id, start and end, with a status of `candidate`, `cut`, `checked`, `approved`, `scheduled`, `live` or `measured`. On pickup read it first and continue from the first clip that is not finished.
 
-Scripts live in `<SKILL_DIR>/scripts/`. They need `python3` and `ffmpeg`; the caption burn needs an ffmpeg built with libass (`cut_short.py` checks and says so). Nothing here calls a posting service unless you pass `--go`.
+Scripts live in `<SKILL_DIR>/scripts/`. They need `python3` and `ffmpeg`; the caption burn needs an ffmpeg built with libass (`cut_short.py` checks and says so). Only `posts.py` talks to a posting service. It creates or changes nothing without `--go`; a dry run still reads the scheduler's queue, and `upload` sends a file.
 
 ## 1. Intake and census
 
@@ -83,7 +83,7 @@ Targets, each with its basis, are in `references/edit-rules.md`. The ones that b
 
 - First spoken word at 0.0 to 0.2 s, mid-sentence on the line that matters.
 - Open on a stake, or on an outcome the eye understands with no context. Never on a number, a term or a UI that needs explaining.
-- A new subject, a punch-in or a cut by 1.0 s, and something meaningful changes at least every 1.5 s. A caption swap does not count.
+- A new subject, a punch-in or a cut by 1.0 s, and something meaningful changes at least every 1.5 s. A caption swap does not count. The cutter splits shots at 1.45 s, so the 1.0 s rule is yours to meet: make the first segment 1.0 s or shorter, or set the spec's `shot` to 1.0.
 - Pauses inside speech cut to 0.3 s, filler words cut, no uniform speed-up as the fix for length.
 - 145 or more spoken words a minute for talk after the cuts, 120 or more for gameplay.
 - Cut to the payoff and stop, usually 7 to 20 s. No fade-in, no outro.
@@ -96,7 +96,7 @@ python3 <SKILL_DIR>/scripts/cut_short.py render specs/a01-demo.json --out clips/
 python3 <SKILL_DIR>/scripts/cut_short.py finish specs/a01-demo.json --out clips/a01-demo     # re-burn text after a caption fix
 ```
 
-Read `metrics.json` after every render: first word time, longest shot, words a minute, speech gaps, loudness. One cold-open reorder per clip is allowed, and the reordered clip must mean exactly what the stream meant.
+Read `metrics.json` after every render: first word time, first change (`first_change_s`), longest shot, words a minute, speech gaps, loudness. One cold-open reorder per clip is allowed, and the reordered clip must mean exactly what the stream meant.
 
 ## 4. Layout
 
@@ -168,19 +168,20 @@ python3 <SKILL_DIR>/scripts/plan_schedule.py clips.json accounts.json --busy bus
 python3 <SKILL_DIR>/scripts/posts.py --backend postiz create plan.json --receipts receipts.jsonl          # dry run; add --go to create
 ```
 
-- The planner keeps at least 6 hours between posts on one account, respects quiet hours and any rolling cap you give it (for example a scheduler plan that allows 3 short-video posts in 24 hours), counts what is already queued and never moves it, and gives a hook variant no slot.
-- Changes after creation are in-place updates of this batch's own queued posts only. The helper refuses a post id that is not in this batch's receipts or is no longer queued.
-- **Never print credential fields.** In the source run a post lookup returned the scheduler's whole account object and put part of an API key and OAuth tokens into tool output. So: read posts only through `posts.py`, which prints an allowlist of fields; pipe any other scheduler output through `redact.py`; never `cat` a credentials file or print the environment. If a secret does reach output, say so and have it rotated.
+- The planner keeps at least 6 hours between posts on one account, respects quiet hours and any rolling cap you give it (for example a scheduler plan that allows 3 short-video posts in 24 hours), counts what is already queued and never moves it, and gives a hook variant no slot until it is released.
+- Changes after creation are in-place updates of this batch's own queued posts only. The helper refuses a post id that is not in this batch's receipts, and skips a post the scheduler does not report as queued.
+- A time that is not in the future is never sent: most schedulers would publish it at once.
+- **Never print credential fields.** In the source run a post lookup returned the scheduler's whole account object and put part of an API key and OAuth tokens into tool output. So: read posts only through `posts.py`, which prints an allowlist of fields as plain values; pipe any other scheduler output through `redact.py`, which masks by key name, by shape and by known value and is a second line, not a guarantee; never `cat` a credentials file or print the environment. If a secret does reach output, say so and have it rotated.
 - Show the calendar and get the owner's approval the way `social-media-posting` requires before any `--go`.
 
 ## 10. After publishing
 
 ```bash
 python3 <SKILL_DIR>/scripts/retention_log.py init plan.json retention-log.csv
-python3 <SKILL_DIR>/scripts/retention_log.py decide retention-log.csv --baseline-views 100 --plan plan.json
+python3 <SKILL_DIR>/scripts/retention_log.py decide retention-log.csv --account yt-main --baseline-views 100 --plan plan.json
 ```
 
-After each fire time, confirm the post is live on the right account with the right file and title, and record its URL. Read the numbers at 24 and 72 hours and let the decision rule say what happens next: double down on a winner, give a loser a new first 2 seconds on platforms where it has not run, release or drop a held variant. Judge the format after 20 to 30 clips, not after one. `references/retention.md` has the columns and the rule.
+After each fire time, confirm the post is live on the right account with the right file and title, and record its URL. Read the numbers at 24 and 72 hours and let the decision rule say what happens next: double down on a winner, give a loser a new first 2 seconds on platforms where it has not run, release or drop a held variant. Judge the format after 20 to 30 clips, not after one; the only earlier stop is a median viewed vs swiped under 60% after 10 posts. `references/retention.md` has the columns and the rule.
 
 ## Inside SpecWithCode
 

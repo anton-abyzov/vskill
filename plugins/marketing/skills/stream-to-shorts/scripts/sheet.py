@@ -81,6 +81,7 @@ def main(argv=None):
     rows = (len(times) + cols - 1) // cols
     tmp = tempfile.mkdtemp(prefix="sheet-")
     try:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         for i, t in enumerate(times):
             p = os.path.join(tmp, "%04d.jpg" % i)
             ok, err = frame(ff, args.video, t, args.cell, p, label_for(t) if labels else None, args.fontfile)

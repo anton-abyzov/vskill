@@ -20,11 +20,11 @@ Record who ran each check. A check nobody ran is written down as a gap, not as a
 
 ```bash
 python3 <SKILL_DIR>/scripts/privacy_scan.py clips/a01-demo/a01-demo.mp4 --out checks/a01-demo --engine tesseract
-python3 <SKILL_DIR>/scripts/privacy_scan.py clips/a01-demo/a01-demo.mp4 --out checks/a01-demo --engine ocrmac \
+python3 <SKILL_DIR>/scripts/privacy_scan.py clips/a01-demo/a01-demo.mp4 --out checks/a01-demo --engine ocrmac --upscale 2 \
   --extra-pattern "<a name, employer or host to look for>"
 ```
 
-1. Use a different OCR engine than the maker used, and keep the 2x upscale pass on. Small text in a zoomed screen recording is read at 2x and missed at 1x.
+1. Use a different OCR engine than the maker used, and keep the 2x upscale pass on (the default for `tesseract`; pass `--upscale 2` for `ocrmac`). Small text in a zoomed screen recording is read at 2x and missed at 1x.
 2. Read the whole unique-lines file, not only the flagged lines. The patterns flag emails, handles, URLs, paths, addresses, long digit runs, code-like groups and credential words. A client name, a project name or a person's name has no pattern.
 3. Look at frames, not only at text. In the source run the items an OCR list could not show were found by eye on enlarged crops: a list of projects on a phone screen, an info pane beside the main window, the stream's own chat inside a crossfade frame, and a webcam overlay that had been captured inside the screen recording.
 4. Check the screen window's edges. A crop that cuts on-screen text into fragments reads as a mistake and can leave half of a private line.
@@ -46,7 +46,7 @@ python3 <SKILL_DIR>/scripts/audio_check.py clips/a01-demo/a01-demo.mp4 --words c
 2. **Compare captions with the screen, not only with the speech.** A caption can repeat the speaker exactly and still be wrong: the speaker names one model while the screen shows another, or says a number that the screen contradicts. A slip of the tongue that the picture disproves is cut or corrected with a label. Never caption it as fact.
 3. **A missing line.** Compare line counts between the original and each translated render. One translated render in the source run had lost a caption line the original had.
 4. **Dropouts.** `audio_check.py` lists stretches near digital silence with sound on both sides. They come from a jump cut with no room tone, a noise gate, or a separated voice stem, and they play as a glitch. In the source run they ran 0.3 to 1.0 s on clips whose loudness was in range. Fill them with room tone from the same recording, or loosen the cut.
-5. **Words that dip.** A word about 30 dB under the speech around it, or one whose start is clipped, is listed as a dipped word. Listen; widen the cut by a few frames.
+5. **Words that dip.** `audio_check.py --words` lists every word that has a 50 ms window under -50 dBFS inside it. In the source run these were words about 30 dB under the speech around them and words whose start a cut had clipped. Listen to each; widen the cut by a few frames.
 6. **First word.** `metrics.json` and `audio_check.py` give its time. Some clips in the source run opened 0.7 to 2.0 s late. Over 0.2 s is a re-cut.
 
 ## 3. Native read of translated text

@@ -15,6 +15,11 @@ FFPROBE = os.environ.get("STS_FFPROBE") or shutil.which("ffprobe")
 HAVE = bool(FFMPEG and FFPROBE and cut_short.has_filter(FFMPEG, "ass"))
 
 
+def shots_first_end(path):
+    with open(path) as f:
+        return round(json.load(f)[0]["t1"], 2)
+
+
 @unittest.skipUnless(HAVE, "needs an ffmpeg with the ass filter (STS_FFMPEG or PATH) and ffprobe")
 class SmokeRender(unittest.TestCase):
     def test_render_stack(self):
@@ -63,6 +68,7 @@ class SmokeRender(unittest.TestCase):
         with open(os.path.join(out, "metrics.json")) as f:
             met = json.load(f)
         self.assertIn("first_word_s", met)
+        self.assertEqual(met["first_change_s"], shots_first_end(os.path.join(out, "shots.json")))
         self.assertEqual(met["words_source"], "words-file")
         self.assertTrue(-15.5 <= met["loudness"]["I"] <= -12.5, met["loudness"])
         with open(os.path.join(out, "shots.json")) as f:

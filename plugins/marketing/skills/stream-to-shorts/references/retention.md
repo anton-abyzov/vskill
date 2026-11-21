@@ -41,14 +41,14 @@ Rules:
 ## 3. The decision rule
 
 ```bash
-python3 <SKILL_DIR>/scripts/retention_log.py decide retention-log.csv --baseline-views N --plan plan.json
+python3 <SKILL_DIR>/scripts/retention_log.py decide retention-log.csv --account <key> --baseline-views N --plan plan.json
 ```
 
 `--plan` links each held variant to its base; without it `decide` makes no release or A/B call. `init` can be run again after a re-plan: rows already in the log are kept as they are.
 
 The lines below are the rule; `decide` implements it.
 
-1. **Baseline.** N is the median views of the account's last 25 short videos [C]. Take it per account.
+1. **Baseline.** N is the median views of the account's last 25 short videos [C]. Take it per account and run `decide` once per account, with `--account <key>` and that account's baseline. Without `--account` every row is read against the one number.
 2. **Winner (24 h read).** Views at or above 3x the baseline, and on YouTube viewed vs swiped at 70% or more [C]. A YouTube row with no viewed-vs-swiped number is not called a winner. The 70% and 60% viewed-vs-swiped lines here and in the loser line are borrowed from the [V] claims in section 4.
 3. **Breakout.** Views at or above 10x the baseline, with the same viewed-vs-swiped condition [C].
 4. **Loser (24 h read).** Viewed vs swiped under 60% on YouTube, whatever the views, or views under 0.75x the baseline [C]. The 0.75 leaves a clip that lands just under a median out of the loser pile: half of all clips are under the median by definition.
@@ -90,8 +90,8 @@ Within 24 h of a clip crossing the winner line:
 
 ### Judging the format
 
-1. **Format review after 10 posts** on the main platform: if the median viewed vs swiped is under 60%, stop cutting new clips and rework the opens first [C].
-2. Judge the format after 20 to 30 clips, not after one [V].
+1. **Early stop, after 10 posts** on the main platform: if the median viewed vs swiped is under 60%, stop cutting new clips and rework the opens first [C]. `decide` prints this line once the log has 10 YouTube reads.
+2. **Verdict on the format, after 20 to 30 clips**, not after one and not at the early stop [V]. The early stop only says the opens need work; whether the format is worth keeping needs the larger sample.
 3. Set expectations from the account's own history (its baseline and its 75th percentile), not from famous reference clips. Viral reposts of famous streamers get their reach from the streamer's name, not from the format [C]. Most clips on a small account land near the baseline; a good first week is a complete log and one winner.
 
 ## 4. Platform thresholds

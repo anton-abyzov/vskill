@@ -21,6 +21,9 @@ BLT_KEY = "blt_" + "b" * 32
 OPAQUE = "q" * 12 + "7" * 12
 SECRETS = [API_KEY, TOK, TOK2, JWT, PASSWORD, BLT_KEY, OPAQUE]
 
+# Fixed clock: the fixtures' post times stay in the future whenever the tests run.
+NOW = posts.parse_utc("2026-11-21T12:00:00Z")
+
 BASE = "https://postiz.example.invalid"
 BBASE = "https://blotato.example.invalid/v2"
 
@@ -96,7 +99,7 @@ class Base(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         code = posts.main(["--backend", backend, "--receipts", self.receipts] + args,
                           transport=transport, env=env, out=out, err=err,
-                          group_factory=lambda: "GROUP-1")
+                          group_factory=lambda: "GROUP-1", now=lambda: NOW)
         self.out, self.err = out.getvalue(), err.getvalue()
         self.assert_no_secrets(self.out + self.err)
         if os.path.exists(self.receipts):
@@ -538,6 +541,204 @@ class Delete(Base):
                              env_blotato(), "blotato")
         self.assertEqual(code, 0, self.err)
         self.assertIn("gone", self.out)
+
+
+class Hardening(Base):
+    """Cases an independent review found open in the first version."""
+
+    def live(self, items):
+        return lambda p, b: (200, {"posts": items})
+
+    def own(self, pid="p1", **extra):
+        self.add_receipt(dict({"action": "create", "backend": "postiz", "post_id": pid, "clip": "a01-demo",
+                               "account": "yt-main"}, **extra))
+
+    # -- leaks --
+    def test_cut_off_error_body_does_not_leak(self):
+        body = '{"message": "bad", "integration": {"accessToken": "' + OPAQUE[:16]
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        t.on("POST", "/api/public/v1/posts", lambda p, b: (400, body))
+        self.run_main(["create", self.write("plan.json", plan_rows()), "--go"], t, env_postiz())
+        with open(self.receipts) as f:
+            everything = self.out + self.err + f.read()
+        self.assertNotIn(OPAQUE[:10], everything)
+
+    def test_own_key_in_an_exception_message_is_masked(self):
+        def boom(p, b):
+            return ValueError("Invalid header value b'%s'" % API_KEY)
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", boom)
+        self.assertEqual(self.run_main(["state"], t, env_postiz()), 1)
+        self.assertIn("ValueError", self.err)
+
+    def test_own_opaque_key_echoed_by_the_server_is_masked(self):
+        env = dict(env_postiz(), STS_POSTIZ_API_KEY=OPAQUE)       # no prefix, no shape
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*",
+                                   lambda p, b: (403, "key %s is not allowed" % OPAQUE))
+        self.assertEqual(self.run_main(["state"], t, env), 1)
+        self.assertIn("HTTP 403", self.err)
+
+    def test_key_with_trailing_newline_is_trimmed_and_control_character_refused(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        self.assertEqual(self.run_main(["state"], t, dict(env_postiz(), STS_POSTIZ_API_KEY=API_KEY + "\n")), 0)
+        self.assertEqual(t.calls[0][2]["Authorization"], API_KEY)
+        t2 = FakeTransport(BASE)
+        self.assertEqual(self.run_main(["state"], t2, dict(env_postiz(), STS_POSTIZ_API_KEY="ab\ncd" + API_KEY)), 1)
+        self.assertIn("STS_POSTIZ_API_KEY has a control character", self.err)
+        self.assertEqual(t2.calls, [])
+
+    def test_url_rules(self):
+        for url, msg in (("https://user:%s@postiz.example.invalid" % PASSWORD, "must not carry a login"),
+                         ("http://postiz.example.invalid", "must be https"),
+                         ("ftp://postiz.example.invalid", "must be https")):
+            t = FakeTransport(BASE)
+            self.assertEqual(self.run_main(["state"], t, dict(env_postiz(), STS_POSTIZ_URL=url)), 1, url)
+            self.assertIn(msg, self.err)
+            self.assertEqual(t.calls, [])
+        for url, extra in (("http://localhost:5000", {}), ("http://10.0.0.5:5000", {"STS_ALLOW_HTTP": "1"})):
+            t = FakeTransport(url).on("GET", "/api/public/v1/posts*", self.live([]))
+            self.assertEqual(self.run_main(["state"], t, dict(env_postiz(), STS_POSTIZ_URL=url, **extra)), 0, self.err)
+
+    def test_nested_server_values_are_not_printed(self):
+        post = queued_post()
+        post["group"] = {"auth": OPAQUE}
+        post["posts"][0]["publishDate"] = {"auth": OPAQUE}
+        post["posts"][0]["state"] = {"auth": OPAQUE}
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok).on("GET", "/api/posts/p1", lambda p, b: (200, post))
+        self.assertEqual(self.run_main(["show", "p1"], t, env_postiz()), 0, self.err)
+        self.own()
+        self.run_main(["update", self.write("c.json", [{"post_id": "p1", "content": "x"}]), "--go"], t, env_postiz())
+        self.assertEqual(t.writes(), [])
+
+    # -- redirects --
+    def test_real_transport_refuses_redirects_and_hides_messages(self):
+        tr = posts.UrllibTransport()
+        self.assertTrue(any(isinstance(h, posts.NoRedirect) for h in tr.opener.handlers))
+        req = posts.urllib.request.Request(BASE + "/x", headers={"Authorization": API_KEY})
+        self.assertIsNone(posts.NoRedirect().redirect_request(req, None, 302, "Found", {}, "https://other.example.invalid/x"))
+        # No network: the opener is replaced by one that raises what http.client raises.
+        class Raises:
+            def __init__(self, exc):
+                self.exc = exc
+
+            def open(self, req, timeout=None):
+                raise self.exc
+        for exc in (ValueError("Invalid header value b'%s'" % API_KEY),
+                    posts.http.client.InvalidURL("nonnumeric port: '%s'" % API_KEY),
+                    posts.http.client.BadStatusLine(API_KEY), OSError(API_KEY),
+                    posts.urllib.error.URLError(API_KEY)):
+            tr.opener = Raises(exc)
+            with self.assertRaises(posts.TransportError) as cm:
+                tr.request("GET", BASE + "/x", {"Authorization": API_KEY})
+            self.assertEqual(str(cm.exception), type(exc).__name__)
+
+    def test_redirect_on_create_is_a_failure_not_a_receipt(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        t.on("POST", "/api/public/v1/posts", lambda p, b: (302, "<html>moved</html>"))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", plan_rows()), "--go", "--only", "1"],
+                                       t, env_postiz()), 0)
+        with open(self.receipts) as f:
+            rec = [json.loads(x) for x in f]
+        self.assertEqual([r["action"] for r in rec], ["create_failed"])
+
+    # -- create --
+    def test_success_with_no_post_id_stops_and_is_not_a_create(self):
+        for payload in ("<html>ok</html>", [{"postId": None}], {"postId": {"auth": OPAQUE}}, []):
+            if os.path.exists(self.receipts):
+                os.remove(self.receipts)
+            t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+            t.on("POST", "/api/public/v1/posts", lambda p, b, payload=payload: (200, payload))
+            plan = self.write("plan.json", plan_rows())
+            self.assertEqual(self.run_main(["create", plan, "--go"], t, env_postiz()), 1)
+            self.assertIn("with no post id", self.err)
+            self.assertEqual(len(t.writes()), 1)                    # stopped after the first row
+            with open(self.receipts) as f:
+                rec = [json.loads(x) for x in f]
+            self.assertEqual([r["action"] for r in rec], ["create_unconfirmed"])
+            # the next run does not treat the row as created
+            t2 = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+            self.assertEqual(self.run_main(["create", plan, "--only", "1"], t2, env_postiz()), 0)
+            self.assertNotIn("skip: in receipts", self.out)
+
+    def test_receipt_without_post_id_or_clip_does_not_mark_rows_done(self):
+        self.add_receipt({"action": "create", "backend": "postiz", "post_id": None, "clip": "a01-demo",
+                          "account": "yt-main"})
+        self.add_receipt({"action": "create", "backend": "postiz", "post_id": "x", "account": "yt-main"})
+        rows = plan_rows()
+        rows["posts"][1].pop("clip")
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", rows)], t, env_postiz()), 0)
+        self.assertNotIn("skip: in receipts", self.out)
+
+    def test_past_time_is_never_created(self):
+        rows = plan_rows()
+        rows["posts"][0]["when_utc"] = "2026-11-21T11:00:00Z"       # an hour before the fixed clock
+        rows["posts"][1]["when_utc"] = "2026-11-21T12:01:00Z"       # inside the 2 minute margin
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        t.on("POST", "/api/public/v1/posts", lambda p, b: (201, [{"postId": "n"}]))
+        self.assertEqual(self.run_main(["create", self.write("plan.json", rows), "--go"], t, env_postiz()), 0)
+        self.assertEqual(self.out.count("skip: the time is not in the future"), 2)
+        self.assertEqual(len(t.writes()), 2)
+
+    def test_create_receipt_names_the_host(self):
+        t = FakeTransport(BASE).on("GET", "/api/public/v1/posts*", self.live([]))
+        t.on("POST", "/api/public/v1/posts", lambda p, b: (201, [{"postId": "n1"}]))
+        self.run_main(["create", self.write("plan.json", plan_rows()), "--go", "--only", "1"], t, env_postiz())
+        with open(self.receipts) as f:
+            self.assertEqual(json.loads(f.readline())["host"], "postiz.example.invalid")
+
+    # -- update and delete guards --
+    def test_post_without_state_is_not_treated_as_queued(self):
+        self.own()
+        for state in (None, "", "DRAFT", "ERROR"):
+            post = queued_post(state=state)
+            if state is None:
+                del post["posts"][0]["state"]
+            t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok).on("GET", "/api/posts/p1", lambda p, b, post=post: (200, post))
+            self.assertEqual(self.run_main(["update", self.write("c.json", [{"post_id": "p1", "content": "x"}]), "--go"],
+                                           t, env_postiz()), 0, self.err)
+            self.assertIn("SKIP p1", self.out)
+            self.assertEqual(self.run_main(["delete", self.write("i.json", [{"post_id": "p1"}]), "--go"],
+                                           t, env_postiz()), 0, self.err)
+            self.assertIn("SKIP p1", self.out)
+            self.assertEqual(t.writes(), [])
+
+    def test_update_refuses_a_group_with_several_posts(self):
+        self.own()
+        post = queued_post()
+        post["posts"].append(dict(post["posts"][0], id="p2"))
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok).on("GET", "/api/posts/p1", lambda p, b: (200, post))
+        self.assertEqual(self.run_main(["update", self.write("c.json", [{"post_id": "p1", "content": "x"}]), "--go"],
+                                       t, env_postiz()), 0, self.err)
+        self.assertIn("its group holds 2 posts", self.out)
+        self.assertEqual(t.writes(), [])
+
+    def test_update_refuses_a_past_date(self):
+        self.own()
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok).on("GET", "/api/posts/p1", lambda p, b: (200, queued_post()))
+        changes = self.write("c.json", [{"post_id": "p1", "date": "2026-11-20T10:00:00.000Z"}])
+        self.assertEqual(self.run_main(["update", changes, "--go"], t, env_postiz()), 0, self.err)
+        self.assertIn("the new time is not in the future", self.out)
+        self.assertEqual(t.writes(), [])
+
+    def test_receipt_from_another_host_or_backend_gives_no_ownership(self):
+        for extra in ({"host": "other.example.invalid"}, {"backend": "blotato"}):
+            if os.path.exists(self.receipts):
+                os.remove(self.receipts)
+            self.own(**extra)
+            t = FakeTransport(BASE)
+            self.assertEqual(self.run_main(["delete", self.write("i.json", [{"post_id": "p1"}]), "--go"],
+                                           t, env_postiz()), 1)
+            self.assertIn("REFUSED p1", self.err)
+            self.assertEqual(t.calls, [])
+
+    def test_post_id_is_one_path_segment(self):
+        self.assertEqual(posts.path_id("a/../b?x=1"), "a%2F..%2Fb%3Fx%3D1")
+        self.own("a/../other")
+        t = FakeTransport(BASE).on("POST", "/api/auth/login", login_ok)
+        self.run_main(["delete", self.write("i.json", [{"post_id": "a/../other"}]), "--go"], t, env_postiz())
+        gets = [p for m, p, _, _ in t.calls if m == "GET"]
+        self.assertEqual(gets, ["/api/posts/a%2F..%2Fother"])
+        self.assertEqual(t.writes(), [])
 
 
 class Upload(Base):

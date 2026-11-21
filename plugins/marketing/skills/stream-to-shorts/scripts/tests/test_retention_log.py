@@ -99,6 +99,23 @@ class Variants(unittest.TestCase):
         self.assertIn("every account", rl.release_call("v", "a01-demo", base, "loser", self.ACCS))
 
 
+class PerAccount(unittest.TestCase):
+    def test_account_filter_reads_one_account_but_release_sees_all(self):
+        rows = [row("a01-demo", "youtube", "yt-main", views=400, vvs=80),
+                row("a01-demo", "tiktok", "tiktok-main", views=9000)]
+        rows[0]["read at 72 h"] = "yes"
+        plan = {"posts": [{"clip": "a01-demo", "account": "yt-main"}, {"clip": "a01-demo", "account": "tiktok-main"},
+                          {"clip": "a02-limit", "account": "x-main"}],
+                "held": [{"clip": "a01-demo-b", "base": "a01-demo"}]}
+        every = rl.decide(rows, B, plan)
+        self.assertTrue(every[0].startswith("a01-demo: winner"))          # the TikTok row carries it
+        one = rl.decide(rows, B, plan, account="yt-main")
+        self.assertTrue(one[0].startswith("a01-demo: loser (yt-main loser)"), one[0])
+        release = [x for x in one if x.startswith("release")][0]
+        self.assertIn("x-main", release)
+        self.assertNotIn("tiktok-main", release)                          # the base ran there
+
+
 class AB(unittest.TestCase):
     def test_too_few_plays(self):
         a = row(views=299, skip=40)

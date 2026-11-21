@@ -290,6 +290,7 @@ def metrics_for(out, dur, shots, words, ff, env):
     gaps = [(round(a["e"], 2), round(b["s"], 2)) for a, b in zip(words, words[1:]) if b["s"] - a["e"] > 0.6]
     return {"file": os.path.basename(out), "duration_s": round(dur, 2), "shots": len(shots),
             "longest_shot": round(longest, 2),
+            "first_change_s": round(shots[0]["t1"], 2) if len(shots) > 1 else None,
             "cuts_per_min": round((len(shots) - 1) / dur * 60, 1) if dur else 0,
             "first_word_s": words[0]["s"] if words else None, "words": len(words),
             "wpm": round(len(words) / dur * 60) if dur else 0, "speech_gaps_over_0.6": gaps,

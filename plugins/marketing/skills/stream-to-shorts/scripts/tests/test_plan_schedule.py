@@ -47,7 +47,7 @@ def base_accounts():
         {"key": "x-main", "platform": "x", "backend": "blotato", "wave": "follow",
          "min_gap_hours": 4, "exclude_tags": ["game"]},
         {"key": "yt-es", "platform": "youtube", "backend": "postiz", "wave": "follow",
-         "offset_minutes": 1470, "lang": "es", "require_tags": ["product"], "max_per_day": 1},
+         "offset_minutes": 30, "lang": "es", "require_tags": ["product"], "max_per_day": 1},
     ]
 
 
@@ -188,6 +188,15 @@ class PlanProperties(unittest.TestCase, Props):
         reasons = {s["account"]: s["reason"] for s in r["skipped"]}
         self.assertIn("excludes", reasons["x-main"])
         self.assertIn("requires", reasons["yt-es"])
+
+    def test_follow_offset_is_added_to_the_next_day(self):
+        clips = [{"id": "a01-demo", "tags": [], "lead": "2026-12-01 10:00"}]
+        accs = [{"key": "x-main", "platform": "x", "wave": "follow", "offset_minutes": 0},
+                {"key": "pro-main", "platform": "linkedin", "wave": "follow", "offset_minutes": 90},
+                {"key": "yt-main", "platform": "youtube", "wave": "lead", "offset_minutes": 90}]
+        w = {p["account"]: p["when_local"][:16] for p in ps.plan(clips, accs, [], TZ)["posts"]}
+        self.assertEqual(w, {"x-main": "2026-12-02T10:00", "pro-main": "2026-12-02T11:30",
+                             "yt-main": "2026-12-01T11:30"})
 
     def test_wanted_time_and_follow_default(self):
         clips = [{"id": "a01-demo", "tags": ["product"], "lead": "2026-12-01 10:00"}]

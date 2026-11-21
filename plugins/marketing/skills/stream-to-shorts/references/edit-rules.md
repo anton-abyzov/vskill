@@ -30,7 +30,7 @@ Basis tags: [M] measured on reference shorts (a November 2026 sample of 15 outli
 2. Never start on "So", "Okay", a greeting or a breath. Start one word later if you have to. [C]
 3. Open on a stake, or on an outcome the eye understands with no context: a render, a fail screen, a reaction. [V] practitioner reports of outcome-first hooks; [C] the scope.
 4. Never open on a number, a term or a UI that needs explaining. A number at frame 0 with its meaning 5 s later gives the answer before the question. [C], from the batch that flopped.
-5. First visual change by 1.0 s: a new subject, a punch-in or a cut. A caption swap does not count. [M] AI-coding median 1.8 s; [C] tighter, because these clips open cold.
+5. First visual change by 1.0 s: a new subject, a punch-in or a cut. A caption swap does not count. [M] AI-coding median 1.8 s; [C] tighter, because these clips open cold. The cutter splits at 1.45 s by default and does not enforce this: make the first segment 1.0 s or shorter, or set the spec's `shot` to 1.0, and read `first_change_s` in `metrics.json`.
 6. Words readable at frame 0: 7 at most, counting everything on screen (title bar, labels, UI text, captions). [C] from the reference frames, which show one short title.
 7. No fade-in, no black frame, no logo on the opening frame. [C]
 

@@ -61,11 +61,20 @@ python3 <SKILL_DIR>/scripts/plan_schedule.py clips.json accounts.json --busy bus
 | Rolling cap | `caps`: at most `max` posts in any `window_hours` across the listed accounts | A scheduler plan may limit short-video posts per 24 hours. It is a parameter because plans differ on whether they count posts or accounts: read yours |
 | Daily cap | `max_per_day` on an account | A new account, or one a platform has already restricted, gets 1 API post a day. In the source run a new account was suspended on its first day of API posting |
 | Tag routing | `require_tags`, `exclude_tags` | Gameplay stays off professional networks and brand accounts. A brand account gets a clip only when the product is clearly on screen |
-| Waves | `lead` accounts take the clip at its lead time plus `offset_minutes`; `follow` accounts about 24 hours later | Short-video feeds first. To halve the number of approvals, hold the follow wave until the clip's 24 hour read and send only winners |
+| Waves | `lead` accounts take the clip at its lead time plus `offset_minutes`; `follow` accounts 24 hours after the lead time (the same clock time the next day) plus `offset_minutes` | Short-video feeds first. See "The follow wave" below |
 | Hook variant | no slot. Listed under `held` until the base clip's 72 hour read; when released (`"release": true`) it runs only on accounts where the base has no post | An alternate opening is not a second post |
 | Time zone | `--tz` with an IANA name; the plan carries local and UTC times | A fixed UTC offset breaks across a daylight-saving change |
 
 The planner writes a plan and a calendar. It never calls a posting service.
+
+### The follow wave
+
+The wave rule in `references/platform-specs.md` sends a clip to timeline platforms only after it passes the winner line. The planner does not know the numbers, so the gate is in how you plan:
+
+1. Plan and create the lead wave only: an `accounts.json` with the `lead` accounts.
+2. After the 24 hour read, put the winners in a new `clips.json` with a new `lead` time, plan them onto the `follow` accounts with `--busy` holding everything already queued, and create that plan.
+
+Planning both waves at once is the ungated shortcut for an account whose history you do not need to protect: every clip then goes out on the follow accounts a day later, whatever its numbers.
 
 ## Before creating anything
 
@@ -89,6 +98,8 @@ python3 <SKILL_DIR>/scripts/posts.py --backend blotato create plan.json --receip
 - `show`, `update` and `delete` on a Postiz-compatible scheduler use its internal API and need `STS_POSTIZ_EMAIL` and `STS_POSTIZ_PASSWORD` as well.
 - Create only: no post id is ever sent on create. A row that already exists (same account and minute, or same account and the same first 60 characters) is skipped.
 - Rolling caps are checked again against the live queue at create time.
+- A row whose time is not at least 2 minutes in the future is skipped. A scheduler would publish it at once.
+- A success status with no post id is not a create. The run stops, writes a `create_unconfirmed` line and the outcome is unknown, as below.
 - A server error or a network error stops the run. The outcome is unknown: read the queue and match account and UTC time before any retry. A blind retry is how duplicates happen.
 - Every created post is one line in `receipts.jsonl`. That file is the list of what this batch owns.
 
@@ -100,7 +111,7 @@ python3 <SKILL_DIR>/scripts/posts.py --backend postiz update changes.json --rece
 python3 <SKILL_DIR>/scripts/posts.py --backend postiz delete ids.json --receipts receipts.jsonl --go
 ```
 
-- **In place, own posts only.** A re-rendered master, a caption fix or a new time is an update of the queued post, never a delete and a new post. The helper refuses any id that is not in `receipts.jsonl` as created by this batch, and skips any post that is no longer queued. Other queues on the same accounts stay untouched.
+- **In place, own posts only.** A re-rendered master, a caption fix or a new time is an update of the queued post, never a delete and a new post. The helper refuses any id that is not in `receipts.jsonl` as created by this batch on this host. It skips any post the scheduler does not report as queued: the state must be `QUEUE`, with no release URL, and the post must be the only one in its group. A post with no state at all is skipped too. A new time that is not in the future is skipped. Other queues on the same accounts stay untouched.
 - Each change carries a `why` and is logged to the receipts. On a Postiz-compatible scheduler the group id changes on every update; the post id does not.
 - A published post is not edited by this helper. Fixing or removing a live post is the account owner's decision.
 
@@ -108,7 +119,10 @@ python3 <SKILL_DIR>/scripts/posts.py --backend postiz delete ids.json --receipts
 
 In the source run a post lookup returned the scheduler's whole account object, and part of an API key plus OAuth access and refresh tokens ended up in tool output. Rotating them is the only remedy. The rule since:
 
-- Read posts and queues only through `posts.py`. It prints an allowlist of fields (id, account, platform, state, time, the start of the text, media name, title, URL) and has no flag for raw output.
+- Read posts and queues only through `posts.py`. It prints an allowlist of fields (id, account, platform, state, time, the start of the text, media name, title, URL), each as one plain value, never a nested object, and has no flag for raw output.
+- The scheduler URL must be `https` (plain `http` only for `localhost`, or with `STS_ALLOW_HTTP=1` on a network you trust) and must not carry a login. A redirect is refused, so the key is never sent on to another host.
+- The helper masks its own key, password and login wherever they appear in output, including error messages.
+- `redact.py` masks by key name, by the shape of common tokens and long opaque strings, and by known value. A secret under an ordinary key name with no recognisable shape gets through it. That is why raw scheduler JSON is never printed, filtered or not, when `posts.py` can answer the question.
 - Anything else that touches a scheduler goes through the filter: `some-command | python3 <SKILL_DIR>/scripts/redact.py`.
 - Credentials come from the environment or an env file. Never from the command line, never echoed, never `cat`. Do not print the environment.
 - Error bodies and receipts are redacted before they are printed or written.
@@ -116,4 +130,4 @@ In the source run a post lookup returned the scheduler's whole account object, a
 
 ## Receipts
 
-One JSON line per action: `{"clip", "account", "platform", "post_id", "when_utc", "status"}` for a create, and `{"action": "update_in_place" | "delete", "post_id", "why", ...}` for a change. Keep it with the batch; the retention log and every later update read it.
+One JSON line per action, each with `action` and `at`: `{"action": "create", "backend", "host", "post_id", "ref", "clip", "account", "platform", "when_utc"}` for a create, and `{"action": "update_in_place" | "delete", "post_id", "why", ...}` for a change. Failed and unconfirmed creates are logged as `create_failed`, `media_failed` and `create_unconfirmed` and give no ownership. Keep it with the batch; the retention log and every later update read it.

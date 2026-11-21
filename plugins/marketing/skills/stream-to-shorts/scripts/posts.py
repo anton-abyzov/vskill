@@ -21,7 +21,9 @@ never from the command line, and is never printed:
   STS_POSTIZ_PASSWORD
   STS_BLOTATO_URL       Blotato API base including the version path
   STS_BLOTATO_API_KEY
-There is no default host.
+There is no default host. The URL must be https (http only for localhost, or
+with STS_ALLOW_HTTP=1). A redirect is refused: the key is never sent on to
+another host.
 
 plan.json rows (from plan_schedule.py) need "ref" (the scheduler's account id),
 "when_utc", "content" {"text", "media", "title" (optional), "settings"
@@ -35,14 +37,18 @@ changes.json: [{"post_id", "why", "media": {"id", "path"}, "content", "title",
 ids.json:     [{"post_id", "why"}]
 
 Guards: update and delete refuse a post id that is not in the receipts as
-created by this batch, and skip a post that is no longer queued. create never
-sends a post id, skips a row that already exists and re-checks the plan's
-rolling caps against the live queue. A 5xx or a network error on create stops
-the run: the outcome is unknown. Everything printed goes through public_view
-or redact_text; every receipt goes through redact().
+created by this batch on this host, and skip a post the scheduler does not
+report as queued (state QUEUE, no release URL, the only post in its group).
+create never sends a post id, skips a row that already exists, skips a time
+that is not in the future and re-checks the plan's rolling caps against the
+live queue. A 5xx, a network error or a success with no post id on create
+stops the run: the outcome is unknown. Everything printed goes through
+public_view or redact_text; every receipt goes through redact(); the
+configured key, password and login are masked wherever they appear.
 """
 import argparse
 import datetime as dt
+import http.client
 import http.cookiejar
 import json
 import mimetypes
@@ -56,7 +62,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from plan_schedule import window_ok  # noqa: E402
-from redact import public_view, redact, redact_text  # noqa: E402
+from redact import add_known, public_view, redact, redact_text, scalar  # noqa: E402
 
 UTC = dt.timezone.utc
 PUBLIC_UA = "Mozilla/5.0 stream-to-shorts"
@@ -66,7 +72,13 @@ BLOTATO_UA = "curl/8.7.1"
 UNKNOWN = "outcome unknown: read the queue and match (account, UTC time) before any retry"
 BLOTATO_PLATFORM = {"tiktok": "tiktok", "x": "twitter", "twitter": "twitter"}
 ENV_KEYS = ("STS_POSTIZ_URL", "STS_POSTIZ_API_KEY", "STS_POSTIZ_EMAIL",
-            "STS_POSTIZ_PASSWORD", "STS_BLOTATO_URL", "STS_BLOTATO_API_KEY")
+            "STS_POSTIZ_PASSWORD", "STS_BLOTATO_URL", "STS_BLOTATO_API_KEY",
+            "STS_ALLOW_HTTP")
+SECRET_KEYS = ("STS_POSTIZ_API_KEY", "STS_POSTIZ_EMAIL", "STS_POSTIZ_PASSWORD",
+               "STS_BLOTATO_API_KEY")
+URL_KEYS = ("STS_POSTIZ_URL", "STS_BLOTATO_URL")
+BODY_LIMIT = 65536          # error bodies are redacted first and cut afterwards
+FUTURE_MARGIN = dt.timedelta(minutes=2)
 
 
 class Stop(Exception):
@@ -79,22 +91,31 @@ class TransportError(Exception):
 
 # ---------- transport ----------
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: urllib would send the key on to the new host
+    and turn a POST into a GET. The 3xx comes back as the response."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class UrllibTransport:
-    """request(method, url, headers, body) -> (status, text). Keeps cookies."""
+    """request(method, url, headers, body) -> (status, text). Keeps cookies.
+    Errors carry the exception's type name only, never its message."""
 
     def __init__(self, timeout=120):
         self.timeout = timeout
         self.opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+            NoRedirect(), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     def request(self, method, url, headers, body=None):
-        req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
         try:
+            req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
             with self.opener.open(req, timeout=self.timeout) as r:
                 return r.status, r.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
-            return e.code, e.read()[:4000].decode("utf-8", "replace")
-        except (urllib.error.URLError, OSError) as e:
+            return e.code, e.read()[:BODY_LIMIT].decode("utf-8", "replace")
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
             raise TransportError(type(e).__name__)
 
 
@@ -120,10 +141,38 @@ def load_env_file(path):
 
 
 def config(env, env_file=None):
+    """Settings from the environment and the env file. Values are trimmed, a
+    control character is refused (by variable name only), and a URL must be
+    https with no user:password part."""
     cfg = {k: env.get(k) for k in ENV_KEYS if env.get(k)}
     if env_file:
         cfg.update({k: v for k, v in load_env_file(env_file).items() if k in ENV_KEYS and v})
+    cfg = {k: v.strip() for k, v in cfg.items() if isinstance(v, str) and v.strip()}
+    add_known(cfg.get(k) for k in SECRET_KEYS)
+    for k, v in cfg.items():
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise Stop("%s has a control character in it" % k)
+    for k in URL_KEYS:
+        if k not in cfg:
+            continue
+        try:
+            u = urllib.parse.urlsplit(cfg[k])
+            host = u.hostname
+        except ValueError:
+            raise Stop("%s is not a URL" % k)
+        if u.username or u.password:
+            add_known([u.password])
+            raise Stop("%s must not carry a login (user:password@)" % k)
+        local = host in ("localhost", "127.0.0.1", "::1")
+        if u.scheme != "https" and not (u.scheme == "http" and (local or cfg.get("STS_ALLOW_HTTP") == "1")):
+            raise Stop("%s must be https (http only for localhost, or with STS_ALLOW_HTTP=1)" % k)
+        if not host:
+            raise Stop("%s has no host" % k)
     return cfg
+
+
+def host_of(url):
+    return (urllib.parse.urlsplit(url).hostname or "").lower()
 
 
 def need(cfg, *keys):
@@ -154,12 +203,23 @@ def plain(text):
 
 
 def safe_body(text, limit=500):
-    """An error body made safe to print."""
+    """An error body made safe to print: redacted first, cut afterwards."""
     try:
         s = json.dumps(redact(json.loads(text)), ensure_ascii=False)
     except (ValueError, TypeError):
         s = text if isinstance(text, str) else str(text)
     return redact_text(s)[:limit]
+
+
+def in_future(when, now):
+    """True when a schedule time is safely after now. A time in the past would
+    publish at once on most schedulers."""
+    return parse_utc(when) > now + FUTURE_MARGIN
+
+
+def path_id(pid):
+    """A post or group id as one URL path segment."""
+    return urllib.parse.quote(str(pid), safe="")
 
 
 def row_settings(row):
@@ -280,9 +340,12 @@ def read_receipts(path):
     return rows
 
 
-def created_ids(rows, backend):
+def created_ids(rows, backend, host=None):
+    """Post ids this batch created on this backend. A receipt that names a
+    host counts only for that host."""
     return {str(r["post_id"]) for r in rows
-            if r.get("action") == "create" and r.get("backend") == backend and r.get("post_id")}
+            if r.get("action") == "create" and r.get("backend") == backend and r.get("post_id")
+            and (not r.get("host") or not host or r["host"] == host)}
 
 
 def append_receipt(path, rec):
@@ -307,6 +370,7 @@ class Postiz:
         self.cfg = cfg
         self.t = transport
         self.base = need(cfg, "STS_POSTIZ_URL")[0].rstrip("/")
+        self.host = host_of(self.base)
         self.logged_in = False
 
     def _public(self, method, path, body=None, raw=None, ctype="application/json"):
@@ -355,7 +419,7 @@ class Postiz:
                 "release_url": p.get("releaseURL"), "raw": p}
 
     def fetch(self, pid):
-        st, text = self._internal("GET", "/api/posts/" + urllib.parse.quote(str(pid)))
+        st, text = self._internal("GET", "/api/posts/" + path_id(pid))
         return st, _json(text) if st == 200 else text
 
 
@@ -367,6 +431,7 @@ class Blotato:
         self.t = transport
         self.base, self.key = need(cfg, "STS_BLOTATO_URL", "STS_BLOTATO_API_KEY")
         self.base = self.base.rstrip("/")
+        self.host = host_of(self.base)
 
     def call(self, method, path, body=None):
         h = {"blotato-api-key": self.key, "user-agent": BLOTATO_UA}
@@ -411,12 +476,13 @@ class Blotato:
 # ---------- commands ----------
 
 class Ctx:
-    def __init__(self, client, out, receipts, go, group_factory):
+    def __init__(self, client, out, receipts, go, group_factory, now=None):
         self.client = client
         self.out = out
         self.receipts = receipts
         self.go = go
         self.group = group_factory
+        self.now = now or (lambda: dt.datetime.now(UTC))
 
     def say(self, s):
         self.out.write(redact_text(s) + "\n")
@@ -427,7 +493,7 @@ class Ctx:
 
 def cmd_state(ctx, a):
     c = ctx.client
-    now = dt.datetime.now(UTC)
+    now = ctx.now()
     start = parse_utc(a.from_) if a.from_ else now
     end = parse_utc(a.to) if a.to else now + dt.timedelta(days=30)
     items = [c.flat(x) for x in c.queue(start, end)]
@@ -445,7 +511,7 @@ def cmd_show(ctx, a):
         st, d = c.fetch(a.post_id)
         if st != 200 or not isinstance(d, dict):
             raise Stop("show %s: HTTP %s %s" % (a.post_id, st, safe_body(d if isinstance(d, str) else "", 200)))
-        ctx.say(json.dumps({"group": d.get("group")}, ensure_ascii=False))
+        ctx.say(json.dumps({"group": scalar(d.get("group"))}, ensure_ascii=False))
         for p in d.get("posts", []):
             ctx.say_view(p)
         return
@@ -469,7 +535,9 @@ def cmd_upload(ctx, a):
     if st not in (200, 201):
         raise Stop("upload failed: HTTP %s %s" % (st, safe_body(text)))
     d = _json(text) or {}
-    ctx.say(json.dumps(redact({"id": d.get("id"), "path": d.get("path")}), ensure_ascii=False))
+    if not isinstance(d, dict):
+        d = {}
+    ctx.say(json.dumps({"id": scalar(d.get("id")), "path": scalar(d.get("path"))}, ensure_ascii=False))
 
 
 def _queue_window(rows, caps):
@@ -492,7 +560,10 @@ def cmd_create(ctx, a):
         return
     caps = plan.get("caps", [])
     done = {(r.get("clip"), r.get("account")) for r in read_receipts(ctx.receipts)
-            if r.get("action") == "create" and r.get("backend") == c.name}
+            if r.get("action") == "create" and r.get("backend") == c.name
+            and r.get("post_id") and r.get("clip") is not None
+            and (not r.get("host") or r["host"] == c.host)}
+    now = ctx.now()
     start, end = _queue_window(rows, caps)
     live = [c.flat(x) for x in c.queue(start, end)]
     times = {}
@@ -507,6 +578,9 @@ def cmd_create(ctx, a):
             continue
         if r.get("ref") is None:
             ctx.say(tag + " skip: no ref")
+            continue
+        if not in_future(r["when_utc"], now):
+            ctx.say(tag + " skip: the time is not in the future")
             continue
         if is_duplicate(r, live):
             ctx.say(tag + " skip: already in the queue")
@@ -536,6 +610,13 @@ def cmd_create(ctx, a):
             times.setdefault(str(r["ref"]), []).append(t)
 
 
+def _no_id(ctx, r, tag, backend, st):
+    """A success status with no post id is not a create: stop, outcome unknown."""
+    append_receipt(ctx.receipts, {"action": "create_unconfirmed", "backend": backend, "clip": r.get("clip"),
+                                  "account": r.get("account"), "http": st})
+    raise Stop("%s: HTTP %s with no post id: %s" % (tag, st, UNKNOWN))
+
+
 def _create_postiz(ctx, r, tag):
     body = build_create_body(r, ctx.group())
     try:
@@ -551,8 +632,12 @@ def _create_postiz(ctx, r, tag):
                                       "account": r.get("account"), "http": st, "body": safe_body(text)})
         return False
     d = _json(text)
-    pid = d[0].get("postId") if isinstance(d, list) and d else (d.get("postId") if isinstance(d, dict) else None)
+    first = d[0] if isinstance(d, list) and d else d
+    pid = first.get("postId") if isinstance(first, dict) else None
+    if not isinstance(pid, (str, int)) or isinstance(pid, bool) or pid == "":
+        _no_id(ctx, r, tag, "postiz", st)
     append_receipt(ctx.receipts, {"action": "create", "backend": "postiz", "post_id": pid,
+                                  "host": ctx.client.host,
                                   "ref": r["ref"], "account": r.get("account"), "clip": r.get("clip"),
                                   "platform": r.get("platform"), "when_utc": body["date"],
                                   "group": body["posts"][0]["group"]})
@@ -571,8 +656,9 @@ def _create_blotato(ctx, r, tag):
         st, text = c.call("POST", "/media", {"url": url})
     except TransportError as e:
         raise Stop("%s: network error on media %s" % (tag, e))
-    murl = (_json(text) or {}).get("url") if st in (200, 201) else None
-    if not murl:
+    md = _json(text) if st in (200, 201) else None
+    murl = md.get("url") if isinstance(md, dict) else None
+    if not isinstance(murl, str) or not murl:
         ctx.say(tag + " media failed %s %s" % (st, safe_body(text)))
         append_receipt(ctx.receipts, {"action": "media_failed", "backend": "blotato", "clip": r.get("clip"),
                                       "account": r.get("account"), "http": st, "body": safe_body(text)})
@@ -592,7 +678,10 @@ def _create_blotato(ctx, r, tag):
         return False
     d = _json(text) or {}
     pid = d.get("id") or d.get("postSubmissionId") or d.get("scheduleId") if isinstance(d, dict) else None
+    if not isinstance(pid, (str, int)) or isinstance(pid, bool):
+        _no_id(ctx, r, tag, "blotato", st)
     append_receipt(ctx.receipts, {"action": "create", "backend": "blotato", "post_id": pid,
+                                  "host": c.host,
                                   "ref": r["ref"], "account": r.get("account"), "clip": r.get("clip"),
                                   "platform": r.get("platform"), "when_utc": body["scheduledTime"],
                                   "media": murl})
@@ -601,8 +690,10 @@ def _create_blotato(ctx, r, tag):
 
 
 def _queued(p, pid):
-    return (str(p.get("id")) == str(pid) and not p.get("releaseURL")
-            and p.get("state", "QUEUE") in ("QUEUE", None))
+    """True only when the scheduler says the post is queued. A post with no
+    state is not treated as queued: a published post must never be edited."""
+    return (isinstance(p, dict) and str(p.get("id")) == str(pid) and not p.get("releaseURL")
+            and str(p.get("state") or "").upper() == "QUEUE")
 
 
 def _check_own(ids, mine):
@@ -617,32 +708,40 @@ def cmd_update(ctx, a):
         raise Stop("update is for postiz only")
     with open(a.changes, encoding="utf-8") as f:
         changes = json.load(f)
-    _check_own([x["post_id"] for x in changes], created_ids(read_receipts(ctx.receipts), "postiz"))
+    _check_own([x["post_id"] for x in changes], created_ids(read_receipts(ctx.receipts), "postiz", c.host))
     for ch in changes:
         pid = ch["post_id"]
         st, d = c.fetch(pid)
         if st != 200 or not isinstance(d, dict) or not d.get("posts"):
             raise Stop("fetch %s: HTTP %s" % (pid, st))
+        if len(d["posts"]) != 1:
+            ctx.say("SKIP %s: its group holds %d posts; an update would rewrite all of them" % (pid, len(d["posts"])))
+            continue
         p = d["posts"][0]
         if not _queued(p, pid):
-            ctx.say("SKIP %s: not queued (state %s)" % (pid, p.get("state")))
+            ctx.say("SKIP %s: not queued (state %s)" % (pid, scalar(p.get("state")) if isinstance(p, dict) else None))
+            continue
+        if "date" in ch and not in_future(ch["date"], ctx.now()):
+            ctx.say("SKIP %s: the new time is not in the future" % pid)
             continue
         body = build_update_body(d, ch)
         what = [k for k in ("media", "title", "content", "replace", "date") if k in ch]
-        ctx.say("%s %s %s %s" % (pid, p.get("publishDate"), ",".join(what), "APPLY" if ctx.go else "dry-run"))
+        ctx.say("%s %s %s %s" % (pid, scalar(p.get("publishDate")), ",".join(what), "APPLY" if ctx.go else "dry-run"))
         if not ctx.go:
             continue
         st, text = c._internal("POST", "/api/posts", body)
         ok = st in (200, 201) and str(pid) in (text or "")
         st2, after = c.fetch(pid)
         a2 = after["posts"][0] if isinstance(after, dict) and after.get("posts") else {}
+        if not isinstance(a2, dict):
+            a2 = {}
         g2 = after.get("group") if isinstance(after, dict) else None
         rec = {"action": "update_in_place", "backend": "postiz", "post_id": pid, "why": ch.get("why"),
                "http": st, "same_id": ok, "changed": what,
-               "date_before": p.get("publishDate"), "date_after": a2.get("publishDate"),
+               "date_before": scalar(p.get("publishDate")), "date_after": scalar(a2.get("publishDate")),
                "date_unchanged": a2.get("publishDate") == p.get("publishDate"),
-               "group_before": d.get("group"), "group_after": g2,
-               "group_unchanged": g2 == d.get("group"), "state_after": a2.get("state")}
+               "group_before": scalar(d.get("group")), "group_after": scalar(g2),
+               "group_unchanged": g2 == d.get("group"), "state_after": scalar(a2.get("state"))}
         append_receipt(ctx.receipts, rec)
         ctx.say("  HTTP %s same_id=%s date_unchanged=%s group_unchanged=%s" % (
             st, ok, rec["date_unchanged"], rec["group_unchanged"]))
@@ -655,7 +754,7 @@ def cmd_delete(ctx, a):
     c = ctx.client
     with open(a.ids, encoding="utf-8") as f:
         items = json.load(f)
-    _check_own([x["post_id"] for x in items], created_ids(read_receipts(ctx.receipts), c.name))
+    _check_own([x["post_id"] for x in items], created_ids(read_receipts(ctx.receipts), c.name, c.host))
     for it in items:
         pid = it["post_id"]
         if c.name == "postiz":
@@ -664,13 +763,16 @@ def cmd_delete(ctx, a):
             if st != 200 or len(ps) != 1 or not _queued(ps[0], pid):
                 ctx.say("SKIP %s: not a single queued post" % pid)
                 continue
-            ctx.say("%s %s %s" % (pid, ps[0].get("publishDate"), "DELETE" if ctx.go else "dry-run"))
+            ctx.say("%s %s %s" % (pid, scalar(ps[0].get("publishDate")), "DELETE" if ctx.go else "dry-run"))
             if not ctx.go:
                 continue
-            st, _ = c._internal("DELETE", "/api/posts/" + urllib.parse.quote(str(d["group"])))
+            if not d.get("group"):
+                ctx.say("SKIP %s: the post has no group id" % pid)
+                continue
+            st, _ = c._internal("DELETE", "/api/posts/" + path_id(d["group"]))
             st2, d2 = c.fetch(pid)
             gone = st2 != 200 or not (isinstance(d2, dict) and d2.get("posts"))
-            date_was = ps[0].get("publishDate")
+            date_was = scalar(ps[0].get("publishDate"))
         else:
             found = [s for s in c.schedules() if str(s.get("id")) == str(pid)]
             if not found:
@@ -681,7 +783,7 @@ def cmd_delete(ctx, a):
             ctx.say("%s %s %s" % (pid, date_was, "DELETE" if ctx.go else "dry-run"))
             if not ctx.go:
                 continue
-            st, _ = c.call("DELETE", "/schedules/" + urllib.parse.quote(str(pid)))
+            st, _ = c.call("DELETE", "/schedules/" + path_id(pid))
             gone = not [s for s in c.schedules() if str(s.get("id")) == str(pid)]
         append_receipt(ctx.receipts, {"action": "delete", "backend": c.name, "post_id": pid,
                                       "why": it.get("why"), "http": st, "gone": gone,
@@ -725,7 +827,7 @@ COMMANDS = {"state": cmd_state, "show": cmd_show, "upload": cmd_upload,
             "create": cmd_create, "update": cmd_update, "delete": cmd_delete}
 
 
-def main(argv=None, transport=None, env=None, out=None, err=None, group_factory=None):
+def main(argv=None, transport=None, env=None, out=None, err=None, group_factory=None, now=None):
     out = out or sys.stdout
     err = err or sys.stderr
     a = build_parser().parse_args(argv)
@@ -742,7 +844,7 @@ def main(argv=None, transport=None, env=None, out=None, err=None, group_factory=
         t = transport or UrllibTransport()
         client = Postiz(cfg, t) if a.backend == "postiz" else Blotato(cfg, t)
         ctx = Ctx(client, out, a.receipts, getattr(a, "go", False),
-                  group_factory or (lambda: str(uuid.uuid4())))
+                  group_factory or (lambda: str(uuid.uuid4())), now)
         COMMANDS[a.cmd](ctx, a)
     except Stop as e:
         err.write("posts: " + redact_text(str(e))[:300] + "\n")

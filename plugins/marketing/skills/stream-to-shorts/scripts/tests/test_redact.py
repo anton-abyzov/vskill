@@ -4,6 +4,7 @@ import json
 import subprocess
 import unittest
 
+import redact as redact_mod
 from redact import MASK, public_view, redact, redact_text
 
 TOK = "tok_" + "x" * 32
@@ -132,6 +133,66 @@ class PublicView(unittest.TestCase):
     def test_text_with_secret_masked(self):
         v = public_view({"id": "p1", "content": "debug " + TOK})
         self.assertNotIn(TOK, v["text"])
+
+
+class Hardening(unittest.TestCase):
+    """Cases an independent review found open in the first version."""
+
+    def tearDown(self):
+        redact_mod.clear_known()
+
+    def test_public_view_never_passes_a_nested_value(self):
+        v = public_view({"id": {"id": 7, "auth": OPAQUE}, "account": {"id": 3, "auth": OPAQUE},
+                         "platform": {"accessToken": OPAQUE}, "title": [OPAQUE], "state": {"x": OPAQUE},
+                         "publishDate": [OPAQUE], "releaseURL": {"u": OPAQUE}})
+        self.assertNotIn(OPAQUE, json.dumps(v))
+        self.assertEqual((v["id"], v["account"], v["platform"], v["title"], v["state"]), (7, 3, None, None, None))
+        for value in v.values():
+            self.assertNotIsInstance(value, (dict, list))
+
+    def test_body_cut_off_inside_a_quoted_value(self):
+        for cut in ('{"a": 1, "accessToken": "' + OPAQUE[:14], '"apiKey":"' + OPAQUE[:8],
+                    "{'refresh_token': '" + OPAQUE[:10]):
+            out = redact_text(cut)
+            self.assertNotIn(OPAQUE[:8], out, cut)
+            self.assertIn(MASK, out)
+
+    def test_more_key_names(self):
+        d = {k: OPAQUE for k in ("accessKey", "access_key", "auth", "oauth", "jwt", "sig", "pwd", "pass",
+                                 "passphrase", "otp", "x-auth", "idToken")}
+        self.assertNotIn(OPAQUE, json.dumps(redact(d)))
+        kept = redact({"author": "Jane", "authors": ["Jane"], "passage": "text", "design": "x"})
+        self.assertEqual(kept, {"author": "Jane", "authors": ["Jane"], "passage": "text", "design": "x"})
+
+    def test_name_value_pair(self):
+        out = redact({"headers": [{"name": "X-Api-Key", "value": OPAQUE}, {"name": "Accept", "value": "text/html"}]})
+        self.assertEqual(out["headers"][0]["value"], MASK)
+        self.assertEqual(out["headers"][1]["value"], "text/html")
+
+    def test_query_names_and_url_userinfo(self):
+        url = "https://user:%s@host.example.invalid/f.mp4?sig=%s&auth=%s&pwd=%s&code=%s&w=1080" % ((OPAQUE,) * 5)
+        out = redact_text(url)
+        self.assertNotIn(OPAQUE, out)
+        self.assertIn("w=1080", out)
+        self.assertIn("host.example.invalid/f.mp4", out)
+
+    def test_long_opaque_strings(self):
+        hex40 = "0123456789abcdef" * 2 + "01234567"
+        b64 = "Zm9v" * 13 + "9"
+        self.assertNotIn(hex40, redact_text("id %s end" % hex40))
+        self.assertNotIn(b64, redact_text("blob=%s" % b64))
+        ordinary = "post cmf3k2x9a0001abcd is at 2026-12-01T15:00:00.000Z, uuid 123e4567-e89b-12d3-a456-426614174000"
+        self.assertEqual(redact_text(ordinary), ordinary)
+
+    def test_known_values_masked_anywhere(self):
+        redact_mod.add_known([OPAQUE, "abc"])            # 3 characters: ignored
+        self.assertEqual(redact_text("Invalid header value b'%s'" % OPAQUE), "Invalid header value b'%s'" % MASK)
+        self.assertEqual(redact({"note": "x %s y" % OPAQUE})["note"], "x %s y" % MASK)
+        self.assertEqual(redact_text("abc"), "abc")
+
+    def test_ordinary_words_with_short_names_inside(self):
+        text = "bypass=1 passage=2 keyboard=3 design=4 error code=400 the key is here author: Jane"
+        self.assertEqual(redact_text(text), text)
 
 
 class CLI(unittest.TestCase):

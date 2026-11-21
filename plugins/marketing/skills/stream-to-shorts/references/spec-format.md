@@ -22,7 +22,7 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
   "fix": {"gpt": "GPT"},
   "cap_edit": [[2.1, 2.4, "40"]],
   "labels": [{"at": 3.0, "dur": 1.6, "text": "40 MIN LATER"}],
-  "variants": {"b": {"bar": "IT FAILED ON THE FIRST RUN", "segments": [], "cap_edit": []}},
+  "variants": {"b": {"bar": "IT FAILED ON THE FIRST RUN", "cap_edit": [[0.0, 0.4, "WATCH"]]}},
   "translations": {"es": {"bar": "...", "caps": [[0.0, 1.8, "..."]], "labels": {"0": "..."}}}
 }
 ```
@@ -46,7 +46,7 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 | `cap_edit` | no | `[[t0, t1, text]]`: replaces each caption word that starts in that output-time range; empty text removes it |
 | `alt_words` | no | `[[t0, t1]]` ranges whose captions use the second highlight colour (a second speaker) |
 | `labels` | no | `[{"at", "dur", "text", "y"}]`; `y` is optional |
-| `variants` | no | `{name: {"bar", "segments", "cap_edit"}}`: an alternate opening. Each key is optional. With a variant only the variant's `cap_edit` applies; `fix` still applies |
+| `variants` | no | `{name: {"bar", "segments", "cap_edit"}}`: an alternate opening. Each key is optional; a variant with no `segments` uses the main ones, and `segments`, when given, must not be empty. With a variant only the variant's `cap_edit` applies; `fix` still applies |
 | `translations` | no | `{lang: {"bar", "caps": [[t0, t1, text]], "labels": {index or original text: text}}}` |
 | `language` | no | Language code passed to the transcribe command, default `en` |
 | `font`, `colors` | no | Caption font name; `{"active": "#RRGGBB", "alt": "#RRGGBB"}` |
@@ -75,9 +75,9 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 
 ### What the cutter writes
 
-In `--out`: `<id>[-variant][-lang].mp4` (the master), `shots[-variant].json`, `words[-variant].json` (caption words in output time, before fixes), `burned[-variant].json` (the words as burned, after `fix` and `cap_edit`), `cap[-variant][-lang].ass`, `metrics[-variant][-lang].json` and `base[-variant].nut` (the cut before text).
+`plan --out` writes `plan[-variant].json` (the shot list with its crop windows). `render` and `finish` write, in `--out`: `<id>[-variant][-lang].mp4` (the master), `shots[-variant].json`, `words[-variant].json` (caption words in output time, before fixes), `burned[-variant].json` (the words as burned, after `fix` and `cap_edit`), `cap[-variant][-lang].ass`, `metrics[-variant][-lang].json` and `base[-variant].nut` (the cut before text).
 
-`metrics.json`: `duration_s`, `shots`, `longest_shot`, `cuts_per_min`, `first_word_s`, `words`, `wpm`, `speech_gaps_over_0.6`, `loudness` (`I`, `LRA`, `TP`), `size_mb`, and `words_source` (`words-file`, `transcribed` or `source-transcript`). `source-transcript` means the stream transcript was mapped through the cut and carries its errors.
+`metrics.json`: `file`, `duration_s`, `shots`, `longest_shot`, `first_change_s` (the end of the first shot), `cuts_per_min`, `first_word_s`, `words`, `wpm`, `speech_gaps_over_0.6`, `loudness` (`I`, `LRA`, `TP`), `size_mb`, and `words_source` (`words-file`, `transcribed` or `source-transcript`). `source-transcript` means the stream transcript was mapped through the cut and carries its errors.
 
 `--words` takes words in output time. The spec's `transcripts` are source time. Do not mix them.
 
@@ -107,12 +107,12 @@ A list of accounts, or `{"accounts": [...], "caps": [...]}`. Build it from the r
 | `platform`, `backend` | `backend` is `postiz` or `blotato` |
 | `ref` | The scheduler's account id, copied as is |
 | `lang` | Picks the clip's `content` for that language |
-| `wave`, `offset_minutes` | `lead` or `follow`; minutes after the wave's start |
+| `wave`, `offset_minutes` | `lead` or `follow`; minutes after the wave's start. A lead wave starts at the clip's lead time, a follow wave 24 hours later |
 | `min_gap_hours`, `max_per_day` | Spacing (default 6) and a daily cap |
 | `require_tags`, `exclude_tags` | Tag routing |
 | `settings` | Platform settings copied to each post |
 
-A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window.
+A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window. In the plan each cap also carries `refs`, the scheduler ids of its accounts, which `posts.py` uses to check the cap against the live queue.
 
 ### busy.json
 
@@ -120,11 +120,11 @@ A cap: `{"name", "accounts": [keys], "max", "window_hours"}`, a rolling window.
 
 ### plan.json
 
-Written by `plan_schedule.py`: `tz`, `posts`, `held`, `skipped`, `busy`, `caps`, `cap_report`. A post row has `clip`, `account`, `platform`, `backend`, `ref`, `lang`, `wave`, `when_local`, `when_utc`, `wanted_local`, `moved_minutes` (how far the slot moved from the wanted time), `variant_of` for a released variant, plus the clip's `content` and `meta`. `held` rows carry `clip`, `base`, `reason` and `not_before_local`. `skipped` rows carry the reason.
+Written by `plan_schedule.py`: `tz`, `posts`, `held`, `skipped`, `busy`, `caps`, `cap_report`. A post row has `clip`, `account`, `platform`, `backend`, `ref`, `lang`, `wave`, `when_local`, `when_utc`, `wanted_local`, `moved_minutes` (how far the slot moved from the wanted time), `variant_of` for a released variant, the account's `settings`, plus the clip's `content` and `meta`. `held` rows carry `clip`, `base`, `reason`, `not_before_local` and `not_before_utc`. `skipped` rows carry the reason.
 
 ### receipts.jsonl
 
-One JSON line per action, written by `posts.py` after redaction: `create` (`backend`, `post_id`, `ref`, `clip`, `account`, `platform`, `when_utc`), `create_failed`, `media_failed`, `update_in_place` and `delete` (`post_id`, `why`). The `create` lines are the list of posts this batch owns.
+One JSON line per action, written by `posts.py` after redaction: `create` (`backend`, `host`, `post_id`, `ref`, `clip`, `account`, `platform`, `when_utc`, and `group` or `media`), `create_failed`, `media_failed`, `create_unconfirmed` (a success status with no post id), `update_in_place` and `delete` (`post_id`, `why`). Every line has `action` and `at`. The `create` lines with a post id are the list of posts this batch owns, on that `host`.
 
 ### changes.json and ids.json
 

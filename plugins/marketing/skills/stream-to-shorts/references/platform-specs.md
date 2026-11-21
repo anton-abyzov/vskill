@@ -165,19 +165,21 @@ Rules:
 
 ## 4. One clip, N exports
 
-`scripts/export.py <master> --preset P1 --out <dir>` renders one preset from `scripts/presets.json`. Size-capped presets (P5, P6) compute their bitrate from the clip length. Common flags for every video preset: `-c:v libx264 -profile:v high -pix_fmt yuv420p -bf 2 -g <2*fps> -keyint_min <2*fps> -sc_threshold 0 -colorspace bt709 -color_primaries bt709 -color_trc bt709 -movflags +faststart -c:a aac -ar 48000 -ac 2`. Keep the source frame rate: 30 if the stream was 30, 60 if it was 60. Do not convert 30 to 60. Loudness: `loudnorm=I=-14:TP=-1:LRA=11` [PRAC; no platform doc read]. Never burn a platform logo or watermark into any export.
+`scripts/export.py <master> --preset P1 --out <dir>` renders one preset from `scripts/presets.json`. Size-capped presets (P5, P6) compute their bitrate from the clip length. Common flags for every video preset: `-c:v libx264 -profile:v high -pix_fmt yuv420p -bf 2 -g <2*fps> -keyint_min <2*fps> -sc_threshold 0 -colorspace bt709 -color_primaries bt709 -color_trc bt709 -movflags +faststart -c:a aac -ar 48000 -ac 2`. Keep the source frame rate: 30 if the stream was 30, 60 if it was 60. Do not convert 30 to 60. Loudness is set once, on the master (`cut_short.py`, -14 LUFS, true peak at or under -1 dBFS) [PRAC; no platform doc read]; `export.py` does not normalise again. Never burn a platform logo or watermark into any export.
 
 | ID | Size | fps | Video | Audio | Max length | Serves | Notes |
 |---|---|---|---|---|---|---|---|
 | **P1 master vertical** | 1080x1920 | source (30 or 60) | VBR `-b:v 10M -maxrate 16M -bufsize 20M` at 60 fps, `-b:v 8M -maxrate 12M -bufsize 16M` at 30 fps, level 4.2 | AAC-LC 48 kHz stereo 256k | 180 s | TikTok, IG Reels, FB Reels, YT Shorts, Threads, LinkedIn, X (Premium) | Peak stays under the IG API 25 Mbps cap. A 180 s clip is at most ~230 MB, under IG's 300 MB. Matches YouTube's 8 and 12 Mbps. Text inside the 823x960 text-safe box; picture edge to edge. |
 | **P2 X free fallback** | 720x1280 | 30 | `-b:v 5M -maxrate 6M -bufsize 10M` | AAC 128k | 140 s | X when the account is not Premium | X API minimum is 5,000 kbps. Free playback is 720p anyway. |
-| **P3 feed 4:5** | 1080x1350 | source | `-b:v 8M -maxrate 12M -bufsize 16M` | AAC 192k | 140 s for X, otherwise 180 s | X timeline, LinkedIn main feed, IG carousel slide 1, FB feed | Recrop, do not letterbox (Meta demotes borders). Text-safe area 14% top, 20% bottom [PRAC]. Top clips only. |
+| **P3 feed 4:5** | 1080x1350 | source | `-b:v 8M -maxrate 12M -bufsize 16M` | AAC 192k | 180 s; X takes 140 s (`export.py` prints a note over 140 s and still writes the file) | X timeline, LinkedIn main feed, IG carousel slide 1, FB feed | Recrop, do not letterbox (Meta demotes borders). Text-safe area 14% top, 20% bottom [PRAC]. Top clips only. |
 | **P4 long 16:9** | 1920x1080 | source | YouTube table: 8M at 30 fps, 12M at 60 fps | AAC 384k | none | YouTube long-form compilation, X or LinkedIn for wide demos | Use the original stream framing. |
-| **P5 Telegram capped** | 1080x1920; drop to 720x1280 if the computed video bitrate is under 3 Mbps | source, 30 max | 2-pass ABR: `kbps = (48*8000/sec) - 128`, then minus 5% | AAC 128k | any | Telegram through a Bot API scheduler (50 MB) | A 60 s clip gets about 6.2 Mbps at 1080p. A 120 s clip gets about 3.0 Mbps, so use 720p. |
+| **P5 Telegram capped** | 1080x1920; drop to 720x1280 if the computed video bitrate is under 3 Mbps | source, 30 max | 2-pass ABR: `kbps = (48*8000/sec) - 128`, then minus 5% | AAC 128k | any | Telegram through a Bot API scheduler (50 MB) | A 60 s clip gets about 6.0 Mbps at 1080p. A 120 s clip gets about 3.0 Mbps, so use 720p. |
 | **P6 Discord teaser** | 720x1280 | 30 | 2-pass ABR: `kbps = (9.5*8000/sec) - 96`, then minus 5% | AAC 96k | 30 s | Discord file upload | 10 MB is safe for every tier and for webhooks. A 30 s clip gets about 2.3 Mbps. Otherwise post the YouTube link. |
 | **C1 vertical cover** | 1080x1920 JPG sRGB, under 8 MB | - | - | - | - | IG Reels `cover_url`, TikTok cover, FB | Title inside the center 1080x1080 (survives both the 1:1 feed-share crop and the 3:4 grid crop). |
 | **C2 Shorts thumbnail** | 2160x3840 JPG or PNG, under 50 MB | - | - | - | - | YT Shorts (desktop Studio, verified or YPP) | Same artwork as C1, upscaled from the vector or 4K source. |
 | **C3 long thumbnail** | 3840x2160 JPG | - | - | - | - | YT long-form | - |
+
+`export.py` renders P1 to P6 and C1. C2 and C3 are specifications for artwork made elsewhere, not presets of the script.
 
 Example P5 bitrate for a 75 s clip: 48 x 8000 / 75 = 5120, minus 128 = 4992, minus 5% gives **about 4.7 Mbps** video at 1080x1920 in 2-pass.
 

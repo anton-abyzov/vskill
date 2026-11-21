@@ -30,7 +30,7 @@ Use it when the stream has a facecam and the screen or game carries the moment.
 5. Captions sit over the face, not over the screen, so they never cover the action. [C]
 6. Mark the facecam box once per stream layout, from a frame of the source. Crop it from eyes to collar so the face fills the 1080x640 panel. A small facecam scaled more than 2x gets a light sharpen. [C]
 
-   If the stream layout changes partway (the facecam moves, shrinks or hides), mark the box again for those segments with the segment's `face` field. A segment with no facecam goes to the full layout.
+   If the stream layout changes partway (the facecam moves, shrinks or hides), mark the box again for those segments with the segment's `face` field. A segment with no facecam goes to the full layout. Text positions come from the spec's `layout`, not the segment's: in a `stack` spec the title bar and captions stay at their stack positions over a `full` segment. Either cut such a clip as `layout: full` throughout, or check the sheet and set `bar_y`, `cap_y` and `lab_y` so the text sits well on both.
 
 7. The screen window is cover-cropped: it keeps the 1080:1160 aspect and fills the panel. Never letterbox it, never pad it, never put blurred or black fill under it. [C]
 

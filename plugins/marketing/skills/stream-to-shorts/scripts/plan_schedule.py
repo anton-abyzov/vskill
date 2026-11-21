@@ -28,8 +28,9 @@ busy.json: a list (or {"busy": [...]}) of existing posts and receipts:
    "2026-12-01 10:00", "clip": "a01-demo" (optional)}
   Busy rows count for spacing and caps. They are never moved or dropped.
 
-Rules: a slot starts at the clip lead plus the account offset (a follow wave
-defaults to +24 h, same clock time next day) and moves forward in --step
+Rules: a slot starts at the clip lead plus the account offset (a follow
+account adds 24 h first: the same clock time next day, then its offset) and
+moves forward in --step
 minute steps until it is min_gap_hours from every post on that account,
 inside quiet hours, under max_per_day for that local day and under every
 rolling cap. Spacing and windows use elapsed time, so a plan across a
@@ -241,9 +242,9 @@ def plan(clips, accounts, busy, tz, start=None, options=None, caps=None):
         return None
 
     def wanted(clip_lead_local_naive, acc):
-        off = acc.get("offset_minutes")
-        if off is None:
-            off = opt["follow_offset_minutes"] if acc.get("wave") == "follow" else 0
+        off = float(acc.get("offset_minutes") or 0)
+        if acc.get("wave") == "follow":
+            off += opt["follow_offset_minutes"]
         # Offsets are wall clock: +24 h is the same clock time the next day.
         return localize(clip_lead_local_naive + dt.timedelta(minutes=float(off)), tz).astimezone(UTC)
 

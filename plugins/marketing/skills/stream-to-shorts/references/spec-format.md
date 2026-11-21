@@ -40,12 +40,12 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 | `facecam` | for `stack` | The face area to show across the top, eyes to collar, not the whole overlay box |
 | `facecam_frame` | no | The stream's overlay box, used by `compile_wide.py` to cover it |
 | `segments` | yes | The cut, in order (below) |
-| `shot` | no | Longest shot before an automatic split, default 1.45 |
+| `shot` | no | Longest shot on screen, in seconds above 0, before an automatic split; default 1.45. Shots are whole frames, so one can be a frame over |
 | `punch` | no | Zoom on every second shot, default 1.08 |
 | `fix` | no | `{heard: shown}`, applied to every caption word (exact match first, then lower case). An empty value removes the word |
 | `cap_edit` | no | `[[t0, t1, text]]`: replaces each caption word that starts in that output-time range; empty text removes it |
 | `alt_words` | no | `[[t0, t1]]` ranges whose captions use the second highlight colour (a second speaker) |
-| `labels` | no | `[{"at", "dur", "text", "y"}]`; `y` is optional. `at` and `dur` say which shot: the label starts on the frame of the cut nearest to `at` and ends on the frame of the later cut nearest to `at + dur`, so it always covers whole shots |
+| `labels` | no | `[{"at", "dur", "text", "y"}]`; `y` is optional. `at` and `dur` say which shot: the label starts on the frame of the cut nearest to `at` and ends on the frame of the later cut nearest to `at + dur`, so it always covers whole shots. `at` is 0 or more and `dur` above 0; a label typed at or past the end of the cut is left out |
 | `bed` | no | Level in dBFS, between -80 and -40, of a quiet noise bed under the whole clip; use about -55 for a stream whose sound went through a noise gate (its pauses are digital silence). Needs an ffmpeg with `anoisesrc`, `volumedetect` and `amix normalize` (4.4 or later). `compile_wide.py` lays a bed when one of its specs has one, at the highest of their levels |
 | `variants` | no | `{name: {"bar", "segments", "cap_edit"}}`: an alternate opening. Each key is optional; a variant with no `segments` uses the main ones, and `segments`, when given, must not be empty. With a variant only the variant's `cap_edit` applies; `fix` still applies |
 | `translations` | no | `{lang: {"bar", "caps": [[t0, t1, text]], "labels": {index or original text: text}}}` |
@@ -60,7 +60,7 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 | `in`, `out` | Source window. Required, `out` after `in` |
 | `src` | Source key for this segment |
 | `tight` | Cut pauses over the gap and filler words inside the window, using the transcript of the sound the segment plays. With `a_in` that is the transcript of `a_src` (or of the segment's source), read at `a_in` |
-| `gap` | Pause length that is cut, default 0.3 |
+| `gap` | Pause length that is cut, default 0.3. Keep it at 0.35 or less: the master's pauses must not pass 0.35 s |
 | `drop` | `[[a, b]]` source ranges to remove (a false start, a garbled line), in the time of the sound: with `a_in`, on the `a_in` clock. Works with `tight` only. A segment whose every part is dropped is left out |
 | `win`, `crop` | Screen window to show. The cutter cover-crops it to the panel's aspect, so the picture always fills the panel |
 | `focus` | `[x, y]` centre of the window when it should not be the centre of `win` |
@@ -76,9 +76,9 @@ One JSON file per clip. Times are seconds. `in`, `out`, `drop`, `a_in` and `g_in
 
 ### What the cutter writes
 
-`plan --out` writes `plan[-variant].json` (the shot list with its crop windows). Each shot carries `frames`, its length in output frames at 30 a second; `in` and `out` sit on that grid, so a span ends up to one frame before the `out` that was typed. `render` and `finish` write, in `--out`: `<id>[-variant][-lang].mp4` (the master), `shots[-variant].json`, `words[-variant].json` (caption words in output time, before fixes), `burned[-variant].json` (the words as burned, after `fix` and `cap_edit`), `cap[-variant][-lang].ass`, `metrics[-variant][-lang].json` and `base[-variant].nut` (the cut before text).
+`plan --out` writes `plan[-variant].json` (the shot list with its crop windows). Each shot carries `frames`, its length in output frames at 30 a second; `in` and `out` sit on that grid, so a span ends up to one frame before the `out` that was typed. A segment that carries on from the one before it starts where that one really ended. `render` and `finish` write, in `--out`: `<id>[-variant][-lang].mp4` (the master), `shots[-variant].json`, `words[-variant].json` (caption words in output time, before fixes), `burned[-variant].json` (the words as burned, after `fix` and `cap_edit`), `cap[-variant][-lang].ass`, `metrics[-variant][-lang].json` and `base[-variant].nut` (the cut before text).
 
-`metrics.json`: `file`, `duration_s`, `shots`, `longest_shot`, `first_change_s` (the end of the first shot), `cuts_per_min`, `first_word_s`, `words`, `wpm`, `speech_gaps_over_0.6`, `loudness` (`I`, `LRA`, `TP`), `size_mb`, `bed_dbfs`, `planned_s` (the length of the plan in whole frames), `labels` (each with `at` and `end`, the cut times it sits on, `typed_at`, `typed_end` and `on_cuts`), and `words_source` (`words-file`, `transcribed` or `source-transcript`). `source-transcript` means the stream transcript was mapped through the cut and carries its errors.
+`metrics.json`: `file`, `duration_s` (the frames of the cut over 30), `shots`, `longest_shot`, `first_change_s` (the end of the first shot), `cuts_per_min`, `first_word_s`, `words`, `wpm`, `speech_gaps_over_0.6`, `loudness` (`I`, `LRA`, `TP`), `size_mb`, `bed_dbfs`, `planned_s` (the length of the plan in whole frames), `labels` (each with `text` as burned, `at` and `end`, the cut times it sits on, `typed_at`, `typed_end`, `on_cuts` and `shown`; `on_cuts` is false only for a shot list made before the frame grid, so render again; `shown` is false for a label typed past the end of the cut), and `words_source` (`words-file`, `transcribed` or `source-transcript`). `source-transcript` means the stream transcript was mapped through the cut and carries its errors.
 
 `--words` takes words in output time. The spec's `transcripts` are source time. Do not mix them.
 

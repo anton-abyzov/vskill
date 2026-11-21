@@ -35,7 +35,7 @@ Work in this order. A stage is done when its file exists.
 
 Keep everything for one stream in `shorts/<source-id>/`, with `batch.json` as the record: one entry per clip, keyed by source id, start and end, with a status of `candidate`, `cut`, `checked`, `approved`, `scheduled`, `live` or `measured`. On pickup read it first and continue from the first clip that is not finished.
 
-Scripts live in `<SKILL_DIR>/scripts/`. They need `python3` and `ffmpeg`; the caption burn needs an ffmpeg built with libass (`cut_short.py` checks and says so). Only `posts.py` talks to a posting service. It creates or changes nothing without `--go`; a dry run still reads the scheduler's queue, and `upload` sends a file.
+Scripts live in `<SKILL_DIR>/scripts/`. They need `python3` and `ffmpeg`; the caption burn needs an ffmpeg built with libass (`cut_short.py` checks and says so). Only `posts.py` calls a posting service's API; the one other download is the media-file hash check in stage 9. It creates or changes nothing without `--go`; a dry run still reads the scheduler's queue, and `upload` sends a file.
 
 ## 1. Intake and census
 
@@ -83,7 +83,7 @@ Targets, each with its basis, are in `references/edit-rules.md`. The ones that b
 
 - First spoken word at 0.0 to 0.2 s, mid-sentence on the line that matters.
 - Open on a stake, or on an outcome the eye understands with no context. Never on a number, a term or a UI that needs explaining.
-- A new subject, a punch-in or a cut by 1.0 s, and something meaningful changes at least every 1.5 s. A caption swap does not count. The cutter splits shots at 1.45 s, so the 1.0 s rule is yours to meet: make the first segment 1.0 s or shorter, or set the spec's `shot` to 1.0.
+- A new subject, a punch-in or a cut by 1.0 s, and something meaningful changes at least every 1.5 s. A caption swap does not count. The cutter splits shots at about 1.45 s on screen (whole frames, so a shot can be one frame over), so the 1.0 s rule is yours to meet: make the first segment 1.0 s or shorter, or set the spec's `shot` to 1.0.
 - Pauses inside speech cut to 0.3 s and never over 0.35 s, filler words cut, no uniform speed-up as the fix for length.
 - 145 or more spoken words a minute for talk after the cuts, 120 or more for gameplay.
 - Cut to the payoff and stop, usually 7 to 20 s. No fade-in, no outro.
@@ -96,9 +96,9 @@ python3 <SKILL_DIR>/scripts/cut_short.py render specs/a01-demo.json --out clips/
 python3 <SKILL_DIR>/scripts/cut_short.py finish specs/a01-demo.json --out clips/a01-demo     # re-burn text after a caption fix
 ```
 
-The cutter keeps every shot a whole number of frames long, picture and sound, and puts every label on cuts: a label covers its whole shot, from the frame of the cut to the next cut. A shot between two frames would leave silence at the join and push every later cut and label off its time.
+The cutter keeps every shot a whole number of frames long, picture and sound, and puts every label on cuts: a label covers its whole shot, from the frame of the cut to the next cut. A shot between two frames would leave silence at the join and push every later cut and label off its time. A source at another frame rate and a slowed shot get the same exact count: the cutter holds the last frame instead of ending the shot early. It warns when a shot reads past the end of its source.
 
-Read `metrics.json` after every render: first word time, first change (`first_change_s`), longest shot, words a minute, speech gaps, loudness, and where each label landed (`labels`). One cold-open reorder per clip is allowed, and the reordered clip must mean exactly what the stream meant.
+Read `metrics.json` after every render: first word time, first change (`first_change_s`), longest shot, words a minute, speech gaps over 0.6 s (the 0.35 s cap is checked by `audio_check.py --words`), loudness, and where each label landed (`labels`). One cold-open reorder per clip is allowed, and the reordered clip must mean exactly what the stream meant.
 
 ## 4. Layout
 
@@ -117,7 +117,7 @@ python3 <SKILL_DIR>/scripts/sheet.py clips/a01-demo/a01-demo.mp4 checks/a01-demo
 
 ## 5. Captions, titles, hook variants
 
-- Captions are the words of the cut, word by word, active word highlighted. The words come from a transcript and need an ear for names and numbers: correct them in the spec, and cut a garbled line instead of captioning a guess.
+- Captions are the words of the cut, word by word, active word highlighted. The words come from a transcript and need an ear for names and numbers: correct them in the spec, and cut a line nobody can make out instead of captioning a guess.
 - The title bar is 3 to 6 words, on screen from the first frame to the last, and says what the picture shows. Every clip gets its own wording.
 - **An alternate opening is not a second post.** A hook variant changes the first seconds of the same clip. Hold it until the first version's 72-hour read, then run it only where the first did not run. The source run scheduled variants as separate posts; that is the mistake this rule fixes.
 - A translated version is a separate render with translated title bar and captions. A native speaker reads every line before it is scheduled.
@@ -135,7 +135,7 @@ python3 <SKILL_DIR>/scripts/music_check.py src/VIDEO_ID.mp4 4795-4812 --model ya
 
 `audio_check.py` also lists dropouts: holes of digital silence left by a cut, a gate or a voice stem. They play as glitches while every loudness number is in range.
 
-**A stream that went through a noise gate has digital silence in every pause.** Check a stretch of the source before cutting. For such a stream set `"bed": -55` in the spec: the cutter lays quiet noise at about -55 dBFS under the whole clip, because the recording has no room tone to borrow. With or without a bed, no pause inside speech is over 0.35 s.
+**A stream that went through a noise gate has digital silence in every pause.** Check a stretch of the source before cutting: `ffmpeg -ss 4795 -t 120 -i src/VIDEO_ID.mp4 -vn stretch.wav`, then `audio_check.py stretch.wav` and read its dropout list. For such a stream set `"bed": -55` in the spec: the cutter lays quiet noise at about -55 dBFS under the whole clip, because the recording has no room tone to borrow. With or without a bed, no pause inside speech is over 0.35 s.
 
 **A tagger score is not a listen.** A low music score clears nothing. Someone, a person or a second model that takes audio, listens to every master before the first post. Record who listened; "nobody yet" is a recorded gap, not a pass.
 
@@ -154,10 +154,10 @@ Render every platform's file from your own master. Never post a file downloaded 
 
 ## 8. Checks before scheduling
 
-All four, on every master and every translated render, before the first post is created. Method and commands: `references/checks.md`.
+All four, on every master and every translated render, before the first post is created. A fifth check, in stage 9, follows every media swap. Method and commands: `references/checks.md`.
 
 1. **Privacy scan by an independent reviewer.** The maker's own scan is not the release check. A different agent, one that did not cut the clips, reads text off every frame with a different engine and reads the whole list, not only the flags.
-2. **Transcript against captions.** The reviewer transcribes the finished master again and compares it with the burned captions (`caption_check.py` on the cutter's `burned.json`). Names and numbers are checked by ear, and captions are compared with the screen too: a caption can match the speech and still contradict the picture. A difference is a question, not a fix: the reviewer's transcript is a guess from the sound too. Change a caption only on a transcript of the source with the sentence around it, where two models agree; never on an isolated half-second, never on a transcript that crosses an edit point. When the models split evenly, caption the reading that fits the picture, record it as a judgment and keep the source excerpt for a person to listen to. In the source run 3 of 39 caption changes made after the check were wrong.
+2. **Transcript against captions.** The reviewer transcribes the finished master again and compares it with the burned captions (`caption_check.py` on the cutter's `burned.json`). Names and numbers are checked by ear, and captions are compared with the screen too: a caption can match the speech and still contradict the picture. A difference is a question, not a fix: the reviewer's transcript is a guess from the sound too. Change a caption only on a transcript of the source with the sentence around it, where two models agree; never on an isolated half-second, never on a transcript that crosses an edit point. When the models split evenly, caption the reading that fits the picture, record it as a judgment and keep the source excerpt for a person to listen to. In the source run 3 of 39 caption changes made after the check were wrong, one of them the maker's own.
 3. **Native read of translated text.** Every translated title bar and caption line.
 4. **Honesty check of every title against the picture.** Each title bar, label, post title and caption claim is compared with "what the shot proves" from stage 2 and with the census, and the clip is watched once with the sound off. A title the footage does not show is rewritten or the clip is dropped.
 
@@ -174,7 +174,7 @@ python3 <SKILL_DIR>/scripts/posts.py --backend postiz create plan.json --receipt
 
 - The planner keeps at least 6 hours between posts on one account, respects quiet hours and any rolling cap you give it (for example a scheduler plan that allows 3 short-video posts in 24 hours), counts what is already queued and never moves it, and gives a hook variant no slot until it is released.
 - Changes after creation are in-place updates of this batch's own queued posts only. The helper refuses a post id that is not in this batch's receipts, and skips a post the scheduler does not report as queued.
-- After any media swap, download the file each scheduler holds for every queued post and compare its hash with the final master (`references/checks.md`, check 5). A 201 proves nothing about the file.
+- After any media swap, download the file each scheduler holds for every queued post and compare its hash with the final master (`references/checks.md`, check 5). Hash the exact file that was uploaded: the master, or the preset export when the post holds one. A 201 proves nothing about the file.
 - A time that is not in the future is never sent: most schedulers would publish it at once.
 - **Never print credential fields.** In the source run a post lookup returned the scheduler's whole account object and put part of an API key and OAuth tokens into tool output. So: read posts only through `posts.py`, which prints an allowlist of fields as plain values; pipe any other scheduler output through `redact.py`, which masks by key name, by shape and by known value and is a second line, not a guarantee; never `cat` a credentials file or print the environment. If a secret does reach output, say so and have it rotated.
 - Show the calendar and get the owner's approval the way `social-media-posting` requires before any `--go`.
@@ -193,7 +193,7 @@ After each fire time, confirm the post is live on the right account with the rig
 These apply when the `studio-code` tools are present.
 
 - One thread owns one stream's batch; `batch.json` and the receipts let another thread or machine continue it.
-- The independent check in stage 8 runs in a separate thread on another model, with the masters only and none of the maker's notes.
+- The independent check in stage 8 runs in a separate thread on another model. It gets the masters, `burned.json`, `shots.json`, the source recording and the candidate list, and none of the maker's notes.
 - Renders and whole-stream transcription can run on another machine; move sources and masters with `studio_file_transfer`.
 - Approval gates use `ask_user`. Credentials are requested with `request_secret`, never pasted into chat.
 
@@ -209,5 +209,5 @@ These apply when the `studio-code` tools are present.
 
 - Every clip in `batch.json` is `measured`, or carries the reason it stopped earlier.
 - Each master met the stage 3 targets in its `metrics.json`, passed `fill_check.py` and the contact sheet, and passed the four checks in stage 8 with the reviewer named.
-- After the last media swap, the file every queued post holds has the hash of its final master.
+- After the last media swap, the file every queued post holds has the hash of the file that was uploaded for it (check 5).
 - Every scheduled post is in `receipts.jsonl`, was verified live, and has its 24 and 72 hour reads in the retention log.

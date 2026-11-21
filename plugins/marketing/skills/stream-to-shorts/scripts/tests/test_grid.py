@@ -126,9 +126,60 @@ class FrameGrid(unittest.TestCase):
             expand_shots(spec({"in": 5.0, "out": 5.02}))
 
     def test_speed_must_be_above_zero(self):
-        for bad in (0, -1, True, "2", None):
-            with self.assertRaises(cutplan.PlanError):
+        for bad in (0, -1, True, "2", None, float("inf"), float("nan")):
+            with self.assertRaises(cutplan.PlanError) as cm:
                 expand_shots(spec({"in": 1.0, "out": 2.0, "speed": bad}))
+            self.assertIn("speed", str(cm.exception), bad)
+
+    def test_max_shot_must_be_above_zero(self):
+        for bad in (0, -1.45, True, "1.45", float("inf"), float("nan")):
+            with self.assertRaises(cutplan.PlanError) as cm:
+                expand_shots(spec({"in": 1.0, "out": 5.0}, shot=bad))
+            self.assertIn("shot", str(cm.exception))
+
+    def test_shots_are_split_by_their_length_on_screen(self):
+        slow = expand_shots(spec({"in": 0.0, "out": 1.4, "speed": 0.5}))        # 2.8 s on screen
+        self.assertEqual([s["frames"] for s in slow], [42, 42])
+        fast = expand_shots(spec({"in": 0.0, "out": 2.8, "speed": 2.0}))        # 1.4 s on screen
+        self.assertEqual([s["frames"] for s in fast], [42])
+        plain = expand_shots(spec({"in": 0.0, "out": 2.9}))                     # 87 frames: two shots, as before
+        self.assertEqual([s["frames"] for s in plain], [44, 43])
+        rnd = random.Random(5)
+        for _ in range(300):
+            sp, mx = rnd.choice([0.5, 0.75, 1.0, 1.1, 1.5, 2.0]), rnd.choice([1.45, 1.0, 0.6])
+            shots = expand_shots(spec({"in": 3.0, "out": round(3.0 + rnd.uniform(0.1, 12.0), 3), "speed": sp}, shot=mx))
+            for s in shots:
+                self.assertLessEqual(s["frames"], int(mx * 30) + 1, (sp, mx))   # at most one frame over
+
+    def test_a_default_written_out_still_carries_on(self):
+        base = {"in": 100.0, "out": 101.01}
+        for other in ({"in": 101.01, "out": 102.5, "a_src": "main"},
+                      {"in": 101.01, "out": 102.5, "a_in": 101.01},
+                      {"in": 101.01, "out": 102.5, "a_in": 101.01, "a_src": "main"}):
+            shots = expand_shots(spec(base, other))
+            self.assertEqual(sum(s["frames"] for s in shots), 75, other)
+            self.assertEqual([s for s in shots if s["in"] >= 100.9][0]["in"], 101.0, other)
+        shots = expand_shots(spec(base, {"in": 101.01, "out": 102.5, "a_in": 101.01, "a_src": "mic"}))
+        self.assertEqual([s for s in shots if s["in"] >= 100.9][0]["in"], 101.01)       # another recording
+
+    def test_the_picture_is_held_to_the_frame_count(self):
+        tail = cutplan.shot_video_tail({"in": 0, "out": 0.733, "frames": 22})
+        self.assertEqual(tail, ";[v]fps=30:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=22[v2]")
+        tail = cutplan.shot_video_tail({"in": 1.0, "out": 1.7, "frames": 42, "speed": 0.5})
+        self.assertEqual(tail, ";[v]setpts=PTS/0.5,fps=30:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=42[v2]")
+        self.assertEqual(cutplan.shot_video_tail({"in": 0, "out": 1}), ";[v]null[v2]")
+        self.assertEqual(cutplan.shot_video_tail({"in": 0, "out": 1, "speed": 1.1}), ";[v]setpts=PTS/1.1[v2]")
+
+    def test_a_shot_past_the_end_of_its_source_is_reported(self):
+        shots = [{"src": "main", "in": 5.0, "out": 6.0}, {"src": "main", "in": 9.4, "out": 10.4},
+                 {"src": "main", "in": 2.0, "out": 3.0, "g_in": 9.5},
+                 {"src": "main", "in": 2.0, "out": 3.0, "a_in": 29.5, "a_src": "mic"},
+                 {"src": "main", "in": 2.0, "out": 3.0, "a_in": 28.0, "a_src": "mic"}]
+        got = cutplan.past_end(shots, {"main": 10.0, "mic": 30.0})
+        self.assertEqual([(shots.index(s), key, have) for s, key, have in got],
+                         [(1, "main", 10.0), (2, "main", 10.0), (3, "mic", 30.0)])
+        self.assertEqual(cutplan.past_end(shots, {"main": None}), [])            # a length that cannot be read
+        self.assertEqual(cutplan.past_end([{"src": "main", "in": 9.0, "out": 10.04}], {"main": 10.0}), [])
 
     def test_sound_is_cut_to_the_frame_count(self):
         a = cutplan.shot_audio_filter({"in": 0, "out": 0.467, "frames": 14})
@@ -160,11 +211,23 @@ class LabelsOnCuts(unittest.TestCase):
 
     def test_edges(self):
         self.assertEqual(snap_label(0.0, 0.1, self.CUTS), (0, 14))
-        self.assertEqual(snap_label(-3, 0.1, self.CUTS), (0, 14))
-        self.assertEqual(snap_label(99, 5, self.CUTS), (87, 130))               # never starts at the end
+        self.assertEqual(snap_label(4.3, 5, self.CUTS), (87, 130))              # never starts at the end
         self.assertEqual(snap_label(0.0, 9999, self.CUTS), (0, 130))
         self.assertEqual(snap_label(0.5, 1, [0, 30]), (0, 30))
-        self.assertEqual(snap_label(7 / 30.0, 0, [0, 14, 28]), (0, 14))         # a tie goes to the earlier cut
+        self.assertEqual(snap_label(7 / 30.0, 0.01, [0, 14, 28]), (0, 14))      # a tie goes to the earlier cut
+
+    def test_a_label_past_the_end_belongs_to_no_shot(self):
+        self.assertIsNone(snap_label(99, 5, self.CUTS))
+        self.assertIsNone(snap_label(130 / 30.0, 1, self.CUTS))
+        self.assertEqual(snap_label(129 / 30.0, 1, self.CUTS), (87, 130))
+
+    def test_a_label_needs_real_times(self):
+        for at, dur in ((-3, 0.1), (0.5, 0), (0.5, -2.0), (float("nan"), 0.5), (0.5, float("nan")),
+                        (float("inf"), 1), (0.5, float("inf")), (True, 1), ("0.5", 1), (0.5, None)):
+            with self.assertRaises(cutplan.PlanError):
+                snap_label(at, dur, self.CUTS)
+        with self.assertRaises(cutplan.PlanError):
+            snap_label(0.5, 1, [0])
 
     def test_cut_time_is_on_the_frame_never_on_the_one_before(self):
         for f in range(0, 9000):
@@ -204,9 +267,29 @@ class LabelsOnCuts(unittest.TestCase):
         shots = [{"in": 0, "out": 1, "frames": n} for n in (14, 29, 44, 43)]
         self.assertEqual(cut_short.label_report(sp, shots),
                          [{"text": "NEXT DAY", "at": 1.433, "end": 2.9, "typed_at": 1.35, "typed_end": 2.35,
-                           "on_cuts": True}])
+                           "on_cuts": True, "shown": True}])
         self.assertFalse(cut_short.label_report(sp, [{"in": 0, "out": 1}])[0]["on_cuts"])
         self.assertEqual(cut_short.label_report({}, shots), [])
+
+    def test_the_report_names_the_text_that_was_burned(self):
+        sp = {"labels": [{"at": 0.1, "dur": 0.2, "text": "FIRST"}, {"at": 1.35, "dur": 1.0, "text": "NEXT DAY"}],
+              "translations": {"es": {"bar": "DEMO", "labels": {"1": "AL DIA SIGUIENTE"}}}}
+        shots = [{"in": 0, "out": 1, "frames": n} for n in (14, 29, 44, 43)]
+        self.assertEqual([x["text"] for x in cut_short.label_report(sp, shots, "es")], ["FIRST", "AL DIA SIGUIENTE"])
+        self.assertEqual([x["text"] for x in cut_short.label_report(sp, shots)], ["FIRST", "NEXT DAY"])
+
+    def test_a_label_past_the_end_is_left_out_and_keeps_its_number(self):
+        # A variant can be shorter than the cut the labels were typed for.
+        sp = {"id": "a01-demo", "bar": "DEMO",
+              "labels": [{"at": 9.0, "dur": 1.0, "text": "LATER"}, {"at": 0.5, "dur": 0.5, "text": "NOW"}],
+              "translations": {"es": {"bar": "DEMO", "labels": {"1": "AHORA"}}}}
+        shots = [{"in": 0, "out": 1, "frames": n} for n in (14, 29)]
+        rep = cut_short.label_report(sp, shots)
+        self.assertEqual([(x["text"], x["shown"], x["at"]) for x in rep], [("LATER", False, None), ("NOW", True, 0.467)])
+        text = captions.build_ass(sp, [], shots=shots)
+        self.assertNotIn("LATER", text)
+        self.assertIn("NOW", text)
+        self.assertIn("AHORA", captions.build_ass(sp, [], lang="es", shots=shots))      # still label 1
 
     def test_wide_moments_change_on_the_cut(self):
         text = compile_wide.build_wide_ass([(0.0, 0.467, "one"), (0.467, 3.0, "two")], [w("hi", 0.1, 0.3)])
@@ -235,6 +318,46 @@ class Bed(unittest.TestCase):
             with self.assertRaises(cut_short.CutError) as cm:
                 self.load(bad)
             self.assertIn("bed", str(cm.exception))
+
+    def test_labels_are_checked_before_anything_is_rendered(self):
+        def load(labels):
+            p = os.path.join(self.d, "spec.json")
+            with open(p, "w") as f:
+                json.dump({"id": "a01-demo", "sources": {"main": "src.mp4"}, "bar": "MY TEST SUITE WENT RED",
+                           "segments": [{"in": 1.0, "out": 3.0}], "labels": labels}, f)
+            return cut_short.load_spec(p)
+        ok = {"at": 0.5, "dur": 1.0, "text": "NEXT DAY"}
+        self.assertEqual(load([ok, dict(ok, y=700)])["labels"][1]["y"], 700)
+        self.assertEqual(load([])["labels"], [])
+        for bad in ({"0": ok}, "NEXT DAY", ["NEXT DAY"], [dict(ok, at="0.5")], [dict(ok, at=-1)], [dict(ok, at=True)],
+                    [dict(ok, at=float("nan"))], [dict(ok, dur=0)], [dict(ok, dur=-2.0)], [dict(ok, dur=float("inf"))],
+                    [{"at": 0.5, "text": "X"}], [{"dur": 1, "text": "X"}], [dict(ok, text="")], [dict(ok, text="  ")],
+                    [dict(ok, text=7)], [{"at": 0.5, "dur": 1.0}], [dict(ok, y="700")], [dict(ok, y=float("nan"))]):
+            with self.assertRaises(cut_short.CutError) as cm:
+                load(bad)
+            self.assertIn("labels", str(cm.exception), bad)
+
+    def test_max_shot_is_checked_in_the_spec(self):
+        p = os.path.join(self.d, "spec.json")
+        for bad in (0, -1, True, "1.45", float("nan")):
+            with open(p, "w") as f:
+                json.dump({"id": "a01-demo", "sources": {"main": "src.mp4"}, "bar": "MY TEST SUITE WENT RED",
+                           "segments": [{"in": 1.0, "out": 3.0}], "shot": bad}, f)
+            with self.assertRaises(cut_short.CutError) as cm:
+                cut_short.load_spec(p)
+            self.assertIn("shot", str(cm.exception))
+
+    def test_a_base_cut_is_measured_in_frames(self):
+        ff = stand_in(self.d, "fp", "import sys\nassert '-count_packets' in sys.argv\nprint('90')\n")
+        self.assertEqual(cut_short.probe_duration(ff, "base.nut"), 3.0)
+        ff = stand_in(self.d, "fp2", "print('N/A')\n")
+        with self.assertRaises(cut_short.CutError):
+            cut_short.probe_duration(ff, "base.nut")
+        self.assertIn("-bf", cut_short.INTERMEDIATE)                              # no B-frames: the file starts at 0
+        ff = stand_in(self.d, "fp3", "print('12.5')\n")
+        self.assertEqual(cut_short.probe_length(ff, "src.mp4"), 12.5)
+        self.assertIsNone(cut_short.probe_length(stand_in(self.d, "fp4", "print('N/A')\n"), "src.mp4"))
+        self.assertIsNone(cut_short.probe_length(os.path.join(self.d, "missing"), "src.mp4"))
 
     def test_no_bed_leaves_the_chain_as_it_was(self):
         self.assertEqual(cut_short.audio_args("ffmpeg-not-run", None, "CHAIN", "TAIL", 9.0, None),
@@ -368,10 +491,16 @@ class CaptionDifferencesInTheSource(unittest.TestCase):
         code, out, _ = self.run_cli([cap, cap])
         self.assertEqual(code, 0)
         self.assertNotIn("question", out)                                        # nothing to ask about
-        for bad in ([], {"shots": 1}, [{"in": 1}], [{"in": "a", "out": 1, "t0": 0, "t1": 1}]):
-            code, _, err = self.run_cli([cap, ind, "--shots", put("bad.json", bad)])
+        good = {"src": "main", "in": 5, "out": 6, "t0": 0, "t1": 4}
+        for bad in ([], {"shots": 1}, [{"in": 1}], [{"in": "a", "out": 1, "t0": 0, "t1": 1}], ["shot"],
+                    [dict(good, a_in="bad")], [dict(good, speed="1.1")], [dict(good, speed=0)],
+                    [dict(good, speed=True)], [dict(good, g_in=[1])], [dict(good, src=None)],
+                    [{k: v for k, v in good.items() if k != "src"}], [dict(good, a_src=7, a_in=1.0)],
+                    [dict(good, t0=float("nan"))], [dict(good, out=float("inf"))], [dict(good, t1="4")]):
+            code, out, err = self.run_cli([cap, ind, "--max-ratio", "0.5", "--shots", put("bad.json", bad)])
             self.assertEqual(code, 2, bad)
             self.assertIn("caption_check", err)
+            self.assertEqual(out, "")
 
 
 if __name__ == "__main__":

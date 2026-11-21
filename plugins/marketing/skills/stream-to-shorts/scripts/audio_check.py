@@ -17,7 +17,7 @@ What it measures:
 With --words (a word-level transcript of this file: whisper JSON with
 segments[].words, a list of {word, start, end} or {w, s, e}, or
 {"words": [...]}) it adds:
-first word time, words a minute, gaps between words over 0.5 s, and every
+first word time, words a minute, gaps between words over 0.35 s, and every
 word that has a 50 ms window below -50 dBFS inside it. That dip usually means
 a cut or a noise gate clipped the word. Listen to each one.
 

@@ -4,7 +4,7 @@ Stage 8. Four checks on every master and every translated render, before the fir
 
 ## Who checks
 
-The maker checks while cutting. That is not the release check. The release check is run by a reviewer who did not cut the clips: another agent on another model, or a person. Give the reviewer the masters, the burned caption words and the candidate list. Do not give them the maker's notes, scan results or reasons: a reviewer who starts from the maker's conclusion confirms it.
+The maker checks while cutting. That is not the release check. The release check is run by a reviewer who did not cut the clips: another agent on another model, or a person. Give the reviewer the masters, the burned caption words (`burned.json`), the cutter's `shots.json`, the source recording and the candidate list. The source and the shot list are what the caption rule in check 2 needs; they carry none of the maker's conclusions. Do not give them the maker's notes, scan results or reasons: a reviewer who starts from the maker's conclusion confirms it.
 
 The reviewer writes one finding per line with clip id, time, what was seen or heard, and a level:
 
@@ -44,7 +44,7 @@ python3 <SKILL_DIR>/scripts/audio_check.py clips/a01-demo/a01-demo.mp4 --words c
 
 **A difference is a question, not a fix.** The reviewer's transcript is a guess from the sound, exactly like the maker's, and it heard a short clip made of pieces. Before a caption changes:
 
-- Transcribe the source recording, not the master, over the whole sentence with a few seconds on each side. The source time comes from `--shots`.
+- Transcribe the source recording, not the master, over the whole sentence with a few seconds on each side. The source time comes from `--shots`. A compilation has no `shots.json` and no `burned.json`: `compile_wide.py` writes `marks.json` (start, end and title of each moment) and `words.json`. Compare `words.json`, treat every mark start as an edit point, and take the source time from the moment's own spec.
 - Change the caption only when two models agree on that sentence.
 - Never change a caption from an isolated half-second. A burst of one or two words has no context, and a model fills the gap with a likely word.
 - Never change a caption from a transcript that runs across an edit point: a jump cut, or the join between two clips of a compilation. The model hears the end of one line and the start of the next as one sentence that nobody said.
@@ -104,7 +104,7 @@ The maker ran a pattern OCR scan and a music tagger on every clip and both came 
 
 So the release check is a look, a listen and a read, by someone else. The scripts shorten that work. They do not do it.
 
-The independent check is not the last word either. Its caption corrections come from a transcript, and 3 of 39 changes made on them were wrong (check 2). A finding about a caption is a place to listen in the source.
+The independent check is not the last word either. Its transcript is a guess from the sound too. In the source run 3 of 39 caption changes made after it were wrong, one of them the maker's own (check 2). A finding about a caption is a place to listen in the source.
 
 ## 5. After a media swap: the file each scheduler holds
 
@@ -117,10 +117,12 @@ shasum -a 256 clips/a01-demo/a01-demo.mp4
 curl -sL "<the media URL the scheduler holds for this post>" | shasum -a 256
 ```
 
+Hash the exact file you uploaded. If the post holds a preset export from `export.py`, compare with that export, not with the master: every preset encodes again, so an export never has the master's hash.
+
 - Postiz-compatible scheduler: the upload URL shown on the post's preview page.
 - Blotato: the `mediaUrls` of the post in the schedule list.
 
-Two different hashes are a fix: swap again and compare again. Record the count in `review.md`, checked and matched. In the source run every queued post was compared this way after the last swap, and all matched: 97 of 97 on one scheduler, 30 of 30 on the other. The media URL is not a credential, but read it through the scheduler's own page or `posts.py`, never from raw account JSON (`scheduling.md`).
+Two different hashes are a fix: swap again and compare again. Record the count in `review.md`, checked and matched. In the source run every queued post was compared this way after the last swap, and all matched: 97 of 97 on one scheduler, 30 of 30 on the other. The media URL is not a credential, but `posts.py state` and `show` print only the file name. Take the URL from the Postiz preview page or the Blotato schedule list, never from raw account JSON (`scheduling.md`).
 
 ## Output
 

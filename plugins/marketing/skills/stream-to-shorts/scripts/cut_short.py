@@ -99,6 +99,11 @@ def preflight_ass(ffmpeg, env=None):
                        "Python package had it in a November 2026 check" % ffmpeg)
 
 
+def number(v):
+    """True for a finite int or float; a bool is not a number here."""
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+
+
 def load_spec(path):
     try:
         with open(path) as f:
@@ -152,6 +157,23 @@ def load_spec(path):
             sp = seg.get("speed", 1.0)
             if isinstance(sp, bool) or not isinstance(sp, (int, float)) or not math.isfinite(sp) or sp <= 0:
                 raise CutError("%s[%d]: \"speed\" must be a number above 0" % (name, i))
+    limit = spec.get("shot")
+    if limit is not None and (not number(limit) or limit <= 0):
+        raise CutError("spec \"shot\" (the longest shot in seconds) must be a number above 0")
+    labels = spec.get("labels", [])
+    if not isinstance(labels, list):
+        raise CutError("spec \"labels\" must be a list: [{\"at\": 1.2, \"dur\": 1.4, \"text\": \"...\"}]")
+    for i, lb in enumerate(labels):
+        if not isinstance(lb, dict):
+            raise CutError("labels[%d] must be an object with \"at\", \"dur\" and \"text\"" % i)
+        if not isinstance(lb.get("text"), str) or not lb["text"].strip():
+            raise CutError("labels[%d] needs a \"text\"" % i)
+        if not number(lb.get("at")) or lb["at"] < 0:
+            raise CutError("labels[%d]: \"at\" must be a time in seconds, 0 or more" % i)
+        if not number(lb.get("dur")) or lb["dur"] <= 0:
+            raise CutError("labels[%d]: \"dur\" must be a length in seconds above 0" % i)
+        if "y" in lb and not number(lb["y"]):
+            raise CutError("labels[%d]: \"y\" must be a number of pixels" % i)
     bed = spec.get("bed")
     if bed is not None and (isinstance(bed, bool) or not isinstance(bed, (int, float)) or not math.isfinite(bed)
                             or not BED_RANGE[0] <= bed <= BED_RANGE[1]):
@@ -210,8 +232,33 @@ def probe_size(ffprobe, path):
 
 
 def probe_duration(ffprobe, path):
-    r = run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path], "ffprobe duration")
-    return float(r.stdout.strip())
+    """Length of a base cut in seconds: its picture frames, counted, over FPS.
+
+    The container's own duration is not used. A NUT file with B-frames starts
+    a few hundredths after 0 and reports that offset as length, so a 90-frame
+    cut reads 3.053 s; the closing fade then starts after the sound has ended.
+    """
+    r = run([ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets",
+             "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", path], "ffprobe frame count")
+    try:
+        return int(r.stdout.strip().strip(",")) / float(cutplan.FPS)
+    except ValueError:
+        raise CutError("ffprobe gave no frame count for %s" % os.path.basename(path))
+
+
+def probe_length(ffprobe, path):
+    """Length of a source in seconds from its container, or None when it has none."""
+    try:
+        r = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                           capture_output=True, text=True, errors="replace")
+        v = float(r.stdout.strip().strip(","))
+    except (OSError, ValueError):
+        return None
+    return v if math.isfinite(v) and v > 0 else None
+
+
+# Intermediate files are encoded without B-frames, so they start at time 0.
+INTERMEDIATE = ["-c:v", "libx264", "-bf", "0", "-preset", "veryfast", "-pix_fmt", "yuv420p"]
 
 
 def tags(variant, lang):
@@ -223,6 +270,8 @@ def build(spec, shots, outdir, variant, ff, fp, env):
     sizes = {}
     layout_name = spec.get("layout", "stack")
     parts = []
+    for line in past_end_warnings(spec, shots, fp):
+        print(line)
     for i, s in enumerate(shots):
         src_key = s["src"]
         src = spec["sources"][src_key]
@@ -232,12 +281,11 @@ def build(spec, shots, outdir, variant, ff, fp, env):
             sizes[src_key] = probe_size(fp, src)
         sw, sh = sizes[src_key]
         d = s["out"] - s["in"]
-        sp = s.get("speed", 1.0)
         try:
             vf = cutplan.shot_video_filter(s, layout_name, sw, sh, spec.get("facecam"))
         except cutplan.PlanError as e:
             raise CutError(str(e))
-        vf += (";[v]setpts=PTS/%s[v2]" % sp) if sp != 1 else ";[v]null[v2]"
+        vf += cutplan.shot_video_tail(s)
         af = cutplan.shot_audio_filter(s)
         ain = []
         if "g_in" in s:
@@ -247,9 +295,8 @@ def build(spec, shots, outdir, variant, ff, fp, env):
         p = os.path.join(outdir, "shot%03d.nut" % i)
         run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % d, "-i", src] + ain
             + ["-filter_complex", vf + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", str(cutplan.FPS)]
-            + frame_limit(s)
-            + ["-c:v", "libx264", "-crf", "12", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-               "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
+            + frame_limit(s) + INTERMEDIATE
+            + ["-crf", "12", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
             "ffmpeg shot %d" % i, env=env)
         parts.append(p)
     tagv, _ = tags(variant, None)
@@ -258,9 +305,8 @@ def build(spec, shots, outdir, variant, ff, fp, env):
     for p in parts:
         ins += ["-i", p]
     fc = "".join("[%d:v][%d:a]" % (i, i) for i in range(len(parts))) + "concat=n=%d:v=1:a=1[v][a]" % len(parts)
-    run([ff, "-v", "error", "-y"] + ins + ["-filter_complex", fc, "-map", "[v]", "-map", "[a]",
-                                           "-c:v", "libx264", "-crf", "12", "-preset", "veryfast",
-                                           "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-f", "nut", base],
+    run([ff, "-v", "error", "-y"] + ins + ["-filter_complex", fc, "-map", "[v]", "-map", "[a]"] + INTERMEDIATE
+        + ["-crf", "12", "-c:a", "pcm_s16le", "-f", "nut", base],
         "ffmpeg concat", env=env)
     for p in parts:
         os.remove(p)
@@ -271,9 +317,20 @@ def build(spec, shots, outdir, variant, ff, fp, env):
 
 def frame_limit(shot):
     """Output options that stop a shot's picture at its planned frame count.
-    With the exact sound length from cutplan.shot_audio_filter, no shot is
-    longer than planned and the join adds no silence."""
+    cutplan.shot_video_tail already gives exactly that many frames and
+    cutplan.shot_audio_filter the matching sound; this is the second lock."""
     return ["-frames:v", str(shot["frames"])] if "frames" in shot else []
+
+
+def past_end_warnings(spec, shots, ffprobe):
+    """A WARN line for every shot that reads past the end of its source."""
+    keys = set()
+    for s in shots:
+        keys.update((s["src"], s.get("a_src", s["src"])))
+    lengths = {k: probe_length(ffprobe, spec["sources"][k]) for k in keys if os.path.exists(spec["sources"][k])}
+    return ["WARN the shot at %.2f-%.2f reads past the end of source %r (%.2f s): it holds the last frame over "
+            "silence there. Fix its \"in\" and \"out\"" % (s["in"], s["out"], key, have)
+            for s, key, have in cutplan.past_end(shots, lengths)]
 
 
 def bed_gain(ff, level, env):
@@ -367,12 +424,16 @@ def loudness(ff, path, env):
     return {"I": g("I"), "LRA": g("LRA"), "TP": g("Peak")}
 
 
-def label_report(spec, shots):
-    """The labels as placed, for metrics.json: each with the times it was typed
-    with and the cut times it got."""
-    return [{"text": lb["text"], "at": t0, "end": t1,
-             "typed_at": lb["at"], "typed_end": round(lb["at"] + lb["dur"], 3), "on_cuts": f0 is not None}
-            for lb, t0, t1, f0, _ in captions.placed_labels(spec, shots)]
+def label_report(spec, shots, lang=None):
+    """The labels as placed, for metrics.json: each with the text that was
+    burned (the translation with `lang`), the times it was typed with and the
+    cut times it got. "shown" is false for a label typed past the end of the
+    cut, which is left out."""
+    tr = captions.translation(spec, lang) if lang else None
+    return [{"text": captions.label_text(lb, i, tr), "at": t0, "end": t1,
+             "typed_at": lb["at"], "typed_end": round(lb["at"] + lb["dur"], 3),
+             "on_cuts": f0 is not None, "shown": t0 is not None}
+            for i, (lb, t0, t1, f0, _) in enumerate(captions.placed_labels(spec, shots))]
 
 
 def metrics_for(out, dur, shots, words, ff, env):
@@ -400,6 +461,7 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
     ass_name = "cap%s%s.ass" % (tagv, tagl)
     try:
         text = captions.build_ass(spec, words, variant, lang, shots=shots)
+        labels = label_report(spec, shots, lang)
     except (ValueError, KeyError, TypeError) as e:
         raise CutError("captions: %s" % e)
     with open(os.path.join(outdir, ass_name), "w") as f:
@@ -433,7 +495,7 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
         "ffmpeg finish", cwd=outdir, env=env)
     met = metrics_for(out, dur, shots, words, ff, env)
     met["bed_dbfs"] = spec.get("bed")
-    met["labels"] = label_report(spec, shots)
+    met["labels"] = labels
     cuts = cutplan.cut_frames(shots)
     met["planned_s"] = round(cuts[-1] / float(cutplan.FPS), 3) if cuts else None
     mpath = os.path.join(outdir, "metrics%s%s.json" % (tagv, tagl))
@@ -460,7 +522,10 @@ def finish(spec, outdir, variant, lang, ff, fp, env, words_source=None):
         print("WARN the cut is %.3f s long and the plan %.3f s: a shot is off the frame grid, so cuts and labels "
               "have drifted. Render again" % (dur, met["planned_s"]))
     for lb in met["labels"]:
-        if not lb["on_cuts"]:
+        if not lb["shown"]:
+            print("NOTE label %r is typed at %.2f s, past the end of this cut, and is left out"
+                  % (lb["text"], lb["typed_at"]))
+        elif not lb["on_cuts"]:
             print("WARN label %r is not on a cut: this shot list has no frame counts. Render again" % lb["text"])
         elif max(abs(lb["at"] - lb["typed_at"]), abs(lb["end"] - lb["typed_end"])) > 2.5 / cutplan.FPS:
             print("NOTE label %r was typed %.2f-%.2f and sits on the cuts at %.2f-%.2f: check it is the right shot"

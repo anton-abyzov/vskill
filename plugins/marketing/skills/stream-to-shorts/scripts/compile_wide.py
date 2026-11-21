@@ -89,13 +89,12 @@ def wide_video_filter(shot, screen, face, wide=WIDE):
     fx, fy, fs = face
     SW, OW, OH, PW = wide["screen_w"], wide["width"], wide["height"], wide["panel_w"]
     gin = "g_in" in shot
-    sp = shot.get("speed", 1.0)
     return (("[1:v]setpts=PTS-STARTPTS[g]" if gin else "[0:v]setpts=PTS-STARTPTS,split=2[g][f]") + ";"
             + "[g]crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos,pad=%d:%d:0:0:white[t];" % (w, h, x, y, SW, OH, OW, OH)
             + ("[0:v]setpts=PTS-STARTPTS," if gin else "[f]")
             + "crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos[ff];" % (fs, fs, fx, fy, PW, PW)
             + "[t][ff]overlay=%d:0,setsar=1[v]" % SW
-            + ((";[v]setpts=PTS/%s[v2]" % sp) if sp != 1 else ";[v]null[v2]"))
+            + cutplan.shot_video_tail(shot))
 
 
 def build_wide_ass(marks, words, mark_specs=None, lang=None, wide=WIDE):
@@ -192,6 +191,8 @@ def main(argv=None):
             shots = cut_short.plan_shots(spec, None, transcripts)
             t0 = t
             sizes = {}
+            for line in cut_short.past_end_warnings(spec, shots, fp):
+                print(line)
             for s in shots:
                 src = spec["sources"][s["src"]]
                 if s["src"] not in sizes:
@@ -211,9 +212,8 @@ def main(argv=None):
                 p = os.path.join(od, "p%03d.nut" % len(parts))
                 cut_short.run([ff, "-v", "error", "-y", "-ss", "%.3f" % s["in"], "-t", "%.3f" % d, "-i", src] + ain
                               + ["-filter_complex", g + ";" + af, "-map", "[v2]", "-map", "[a2]", "-r", str(cutplan.FPS)]
-                              + cut_short.frame_limit(s)
-                              + ["-c:v", "libx264", "-crf", "14", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-                                 "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
+                              + cut_short.frame_limit(s) + cut_short.INTERMEDIATE
+                              + ["-crf", "14", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "nut", p],
                               "ffmpeg part %d" % len(parts), env=env)
                 parts.append(p)
                 t += s["frames"] / float(cutplan.FPS) if "frames" in s else d / s.get("speed", 1.0)
@@ -232,8 +232,8 @@ def main(argv=None):
             ins += ["-i", p]
         cut_short.run([ff, "-v", "error", "-y"] + ins
                       + ["-filter_complex", "".join("[%d:v][%d:a]" % (i, i) for i in range(len(parts))) + "concat=n=%d:v=1:a=1[v][a]" % len(parts),
-                         "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-crf", "14", "-preset", "veryfast",
-                         "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-f", "nut", base], "ffmpeg concat", env=env)
+                         "-map", "[v]", "-map", "[a]"] + cut_short.INTERMEDIATE
+                      + ["-crf", "14", "-c:a", "pcm_s16le", "-f", "nut", base], "ffmpeg concat", env=env)
         for p in parts:
             os.remove(p)
         words, how = None, None
@@ -276,7 +276,7 @@ def main(argv=None):
               % (j["input_i"], j["input_tp"], j["input_lra"], j["input_thresh"], j["target_offset"]))
         # The compilation gets a room-tone bed when one of its specs asks for one.
         extra, audio = cut_short.audio_args(ff, max(beds) if beds else None, "%s,%s" % (pre, ln),
-                                            "alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.1" % (dur - 0.1),
+                                            "alimiter=limit=0.89:level=false,afade=t=out:st=%.2f:d=0.1" % max(0.0, dur - 0.1),
                                             dur, env)
         cut_short.run([ff, "-v", "error", "-y", "-i", "base.nut"] + extra + ["-vf", "ass=cap.ass"] + audio
                       + ["-c:v", "libx264", "-profile:v", "high", "-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p",

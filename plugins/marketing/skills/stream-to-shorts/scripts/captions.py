@@ -61,16 +61,29 @@ def placed_labels(spec, shots=None):
     With the shot list every label is moved onto the cuts (see
     cutplan.snap_label) and start and end are the cut times; the frames are
     None without a shot list on the frame grid, and the typed times are kept.
+    A label typed past the end of the cut keeps its place in the list, with
+    start and end None, and is not shown.
     """
     cuts = cut_frames(shots) if shots else None
     out = []
     for lb in spec.get("labels", []):
         if cuts:
-            f0, f1 = snap_label(lb["at"], lb["dur"], cuts)
+            placed = snap_label(lb["at"], lb["dur"], cuts)
+            if placed is None:
+                out.append((lb, None, None, None, None))
+                continue
+            f0, f1 = placed
             out.append((lb, round(f0 / float(FPS), 3), round(f1 / float(FPS), 3), f0, f1))
         else:
             out.append((lb, lb["at"], lb["at"] + lb["dur"], None, None))
     return out
+
+
+def label_text(label, index, tr=None):
+    """The text of a label, in the translation `tr` when it has one for it
+    (by position in the spec's list, then by the original text)."""
+    labels = tr.get("labels", {}) if tr else {}
+    return labels.get(str(index), labels.get(label["text"], label["text"]))
 
 
 def bar_font_size(text, width=780, char_w=0.52, caps=(74, 46)):
@@ -211,10 +224,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           + ass_text(bar.upper())]
     tr = translation(spec, lang) if lang else None
     for i, (lb, t0, t1, f0, f1) in enumerate(placed_labels(spec, shots)):
-        txt = lb["text"]
-        if tr:
-            labels = tr.get("labels", {})
-            txt = labels.get(str(i), labels.get(lb["text"], txt))
+        if t0 is None:
+            continue
+        txt = label_text(lb, i, tr)
         y = min(layout["label_max_y"], lb.get("y", lab_y))
         times = (ass_time(t0), ass_time(t1)) if f0 is None else (cut_time(f0), cut_time(f1))
         ev.append("Dialogue: 4,%s,%s,Label,,0,0,0,,{\\pos(%d,%d)}" % (times[0], times[1], CX, y)

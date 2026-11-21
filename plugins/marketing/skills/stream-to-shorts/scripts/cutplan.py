@@ -20,6 +20,7 @@ expand_shots.
 """
 import argparse
 import json
+import math
 import sys
 
 FPS = 30               # the cutter renders every shot at this rate
@@ -157,6 +158,8 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
     starts where that one really ended, so nothing is skipped between them.
     """
     mx = spec.get("shot", layout["max_shot"])
+    if not _number(mx) or not mx > 0:
+        raise PlanError("spec \"shot\" (the longest shot in seconds) must be a number above 0")
     default_src = spec.get("src")
     punch_default = spec.get("punch", layout["punch"])
     res, k = [], 0
@@ -166,15 +169,19 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
         if src is None:
             raise PlanError("segment at %s has no source: set spec \"src\" or segment \"src\"" % seg.get("in"))
         sp = seg.get("speed", 1.0)
-        if isinstance(sp, bool) or not isinstance(sp, (int, float)) or not sp > 0:
+        if not _number(sp) or not sp > 0:
             raise PlanError("segment at %s: \"speed\" must be a number above 0" % seg.get("in"))
-        link = (src, seg.get("a_src"), _offset(seg, "a_in"), _offset(seg, "g_in"))
+        # Where the sound and the moved picture sit against "in": two segments
+        # carry on from each other only when these agree. Read through
+        # audio_source, so a default written out ("a_src" equal to "src",
+        # "a_in" equal to "in") is the same link as one left out.
+        akey, a0 = audio_source(seg, src)
+        link = (src, akey, round(a0 - seg["in"], 6), _offset(seg, "g_in"))
         if seg.get("tight") and words_for is not None:
             # Pauses are cut on the sound the viewer hears (see audio_source).
             # When that sound comes from another source or time, the words
             # and "drop" ranges are read in its time, and the spans are then
             # moved back to picture time.
-            akey, a0 = audio_source(seg, src)
             shift = seg["in"] - a0
             if akey != src or shift:
                 aseg = dict(seg)
@@ -193,8 +200,9 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
             prev = (link, b, start + total * sp / float(FPS))
             if total < 1:
                 continue                                    # shorter than one frame
-            d = b - start
-            n = 1 if seg.get("still") else max(1, int(-(-d // mx)))
+            # The max shot is a length on screen, so a sped-up or slowed span
+            # is split by its length after the speed change.
+            n = 1 if seg.get("still") else max(1, int(math.ceil(total / float(FPS) / mx - 1e-9)))
             n = min(n, total)
             for i in range(n):
                 f0 = (2 * total * i + n) // (2 * n)
@@ -216,6 +224,11 @@ def expand_shots(spec, variant=None, words_for=None, layout=DEFAULT_LAYOUT, fill
     if not res:
         raise PlanError("the cut is empty: every segment was dropped")
     return res
+
+
+def _number(v):
+    """True for a finite int or float; a bool is not a number here."""
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
 
 
 def _offset(seg, key):
@@ -264,8 +277,16 @@ def snap_label(at, dur, cuts, fps=FPS):
 
     A label belongs to a shot: it starts on a cut and ends on a later cut, so
     it never sits over the picture before its own. The start is the cut
-    nearest to `at`, the end the later cut nearest to `at + dur`.
+    nearest to `at`, the end the later cut nearest to `at + dur`. None for a
+    label typed at or past the end of the cut: it belongs to no shot of this
+    cut (a variant can be shorter than the cut the label was typed for).
     """
+    if not _number(at) or not _number(dur) or at < 0 or not dur > 0:
+        raise PlanError("a label needs \"at\" of 0 or more and \"dur\" above 0, in seconds")
+    if not cuts or len(cuts) < 2:
+        raise PlanError("no cuts to put a label on")
+    if at >= cuts[-1] / float(fps):
+        return None
     start = min(cuts[:-1], key=lambda c: (abs(c / float(fps) - at), c))
     end = min((c for c in cuts if c > start), key=lambda c: (abs(c / float(fps) - (at + dur)), c))
     return start, end
@@ -407,6 +428,46 @@ def shot_audio_filter(shot):
     pad = "[1:a]" if "a_in" in shot and "g_in" not in shot else "[0:a]"
     return (pad + "asetpts=PTS-STARTPTS," + gate + "volume=%s,afade=t=in:d=0.01,afade=t=out:st=%.3f:d=0.01" % (shot.get("vol", 1.0), fo)
             + (",atempo=%s" % sp if sp != 1 else "") + _exact_length(shot) + "[a2]")
+
+
+def shot_video_tail(shot):
+    """The end of a shot's picture chain, [v] to [v2]: the speed change, then
+    exactly "frames" frames at FPS.
+
+    A cap on the frame count is not enough. A source at another frame rate, or
+    a slowed shot, runs out of frames before the count is reached (24 frames a
+    second gives 17 frames for 0.733 s, which reach 21 of the 23 planned), and
+    the encoder then ends the sound with the picture. So the picture is put on
+    the FPS grid from time 0, its last frame is held, and the count cuts it.
+    """
+    sp = shot.get("speed", 1.0)
+    head = ("setpts=PTS/%s," % sp) if sp != 1 else ""
+    if "frames" not in shot:
+        return ";[v]%s[v2]" % (head.rstrip(",") or "null")
+    return ";[v]%sfps=%d:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d[v2]" % (head, FPS, shot["frames"])
+
+
+def past_end(shots, lengths):
+    """Shots that read past the end of a source: [(shot, source key, source length)].
+
+    lengths maps a source key to its length in seconds (None when unknown).
+    Such a shot still renders to its planned length, on a held last frame and
+    silence, so it has to be reported. Pure.
+    """
+    out = []
+    for s in shots:
+        d = s["out"] - s["in"]
+        reads = [(s["src"], s["in"] + d)]
+        if "g_in" in s:
+            reads.append((s["src"], s["g_in"] + d))
+        elif "a_in" in s:
+            reads.append((s.get("a_src", s["src"]), s["a_in"] + d))
+        for key, end in reads:
+            have = lengths.get(key)
+            if have is not None and end > have + 0.05:
+                out.append((s, key, have))
+                break
+    return out
 
 
 def _exact_length(shot):

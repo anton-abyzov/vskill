@@ -41,6 +41,7 @@ independent words. Exit 1 when it is over --max-ratio, 2 on an error.
 import argparse
 import difflib
 import json
+import math
 import os
 import re
 import sys
@@ -142,6 +143,27 @@ def sound_place(shot):
     return shot.get("src"), shot["in"]
 
 
+def check_shots(shots):
+    """Raise ValueError unless every shot has what the source place needs:
+    a source key and finite numbers for its times."""
+    def num(v):
+        return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+    for i, s in enumerate(shots):
+        if not isinstance(s, dict):
+            raise ValueError("shot %d is not an object" % i)
+        for k in ("in", "out", "t0", "t1"):
+            if not num(s.get(k)):
+                raise ValueError("shot %d needs a number for %r" % (i, k))
+        for k in ("a_in", "g_in", "speed"):
+            if k in s and not num(s[k]):
+                raise ValueError("shot %d: %r is not a number" % (i, k))
+        if s.get("speed", 1.0) <= 0:
+            raise ValueError("shot %d: \"speed\" must be above 0" % i)
+        for k in ("src", "a_src"):
+            if (k == "src" or k in s) and (not isinstance(s.get(k), str) or not s[k]):
+                raise ValueError("shot %d needs a source key in %r" % (i, k))
+
+
 def edits(shots):
     """Output times where the sound jumps: the joins between shots that do not
     carry on from each other in the source. Pure."""
@@ -206,8 +228,7 @@ def main(argv=None):
                 shots = json.load(fh)
             if not isinstance(shots, list) or not shots:
                 raise ValueError("%s holds no shots" % os.path.basename(args.shots))
-            for s in shots:
-                float(s["in"]) + float(s["out"]) + float(s["t0"]) + float(s["t1"])
+            check_shots(shots)
     except (OSError, ValueError, TypeError, AttributeError, KeyError) as exc:
         print("caption_check: cannot read word files: %s" % exc, file=sys.stderr)
         return 2

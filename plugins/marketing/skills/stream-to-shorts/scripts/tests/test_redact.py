@@ -202,14 +202,14 @@ class Round2(unittest.TestCase):
         redact_mod.clear_known()
 
     def test_long_runs_are_scanned_in_linear_time(self):
-        import time
+        import time                      # CPU time, so a busy machine does not fail it
         n = 60000
         bodies = ["<html>" + "aZ9" * (n // 3) + "</html>", "a-b_" * (n // 4), "x.y" * (n // 3),
                   "tok" * (n // 3), ("key" * 5 + "=") * (n // 16), "eyJ" * (n // 3), "ab12" * (n // 4) + ".mp4"]
-        t = time.time()
+        t = time.process_time()
         for b in bodies:
             redact_text(b)
-        self.assertLess(time.time() - t, 3.0)
+        self.assertLess(time.process_time() - t, 3.0)
 
     def test_key_names_with_spaces_and_affixes(self):
         d = redact({"Api Key": OPAQUE, "access key": OPAQUE, "clientKey": OPAQUE, "signing_key": OPAQUE,
@@ -336,10 +336,10 @@ class Round3(unittest.TestCase):
         n = 60000
         bodies = ['\\"token\\": \\"' + "\\" * n, ('\\"key\\": \\"' + "a\\") * (n // 12), "\\\"" * (n // 2),
                   '\\"' + "a_b-" * (n // 4) + '\\": \\"x']
-        t = time.time()
+        t = time.process_time()
         for b in bodies:
             redact_text(b)
-        self.assertLess(time.time() - t, 3.0)
+        self.assertLess(time.process_time() - t, 3.0)
 
     def test_a_secret_used_as_a_dict_key(self):
         d = redact({TOK: 1, "Bearer " + OPAQUE: {"n": 2}, "name": "x", 5: "y"})

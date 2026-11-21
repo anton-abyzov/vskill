@@ -757,9 +757,9 @@ class Round2(Base):
 
     def test_long_error_body_does_not_hang(self):
         import time
-        t0 = time.time()
+        t0 = time.process_time()
         out = posts.safe_body("<html>" + "aZ9" * 20000 + "</html>")
-        self.assertLess(time.time() - t0, 2.0)
+        self.assertLess(time.process_time() - t0, 2.0)
         self.assertLessEqual(len(out), 500)
 
     def test_secret_at_the_cuts_is_masked(self):

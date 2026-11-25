@@ -18,7 +18,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveInstallPath } from "../eval/disk-version.js";
-import { getPluginSource } from "../marketplace/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import type { SkillLockEntry } from "../lockfile/types.js";
 import { yellow } from "../utils/output.js";
@@ -221,6 +220,7 @@ export async function fetchUpstreamSkillMds(
     if (!manifest) return [];
     let source: string | null = null;
     try {
+      const { getPluginSource } = await import("../marketplace/index.js");
       source = getPluginSource(parsed.pluginName, manifest);
     } catch {
       return [];

@@ -242,6 +242,12 @@ export interface SkillDetail {
   provenanceVerified?: boolean;
   command?: string | null;
   pluginName?: string | null;
+  /** Repo-relative SKILL.md path, when the registry knows it. */
+  skillPath?: string;
+  /** 1486: the latest published version is deprecated (SkillVersion.deprecated). */
+  deprecated?: boolean;
+  /** 1486: "<message> Replaced by: <replacedBy>." from SkillVersion.deprecationMsg. */
+  deprecationMsg?: string | null;
 }
 
 export interface SubmissionResponse {
@@ -406,6 +412,9 @@ export async function getSkill(name: string): Promise<SkillDetail> {
     provenanceVerified: raw.provenanceVerified != null ? Boolean(raw.provenanceVerified) : undefined,
     command: raw.command ? String(raw.command) : null,
     pluginName: raw.pluginName ? String(raw.pluginName) : null,
+    skillPath: raw.skillPath ? String(raw.skillPath) : undefined,
+    deprecated: raw.deprecated === true ? true : undefined,
+    deprecationMsg: typeof raw.deprecationMsg === "string" ? raw.deprecationMsg : null,
   };
 }
 
@@ -624,6 +633,8 @@ export interface CheckUpdateResult {
   warning?: string;
   /** 0932: the GitHub source's SKILL.md differs from the installed one. */
   sourceChanged?: boolean;
+  /** 1486: deprecated skills under this entry, read from the source's current SKILL.md. */
+  deprecations?: Array<{ skill: string; message: string; replacedBy: string; since?: string }>;
 }
 
 /**

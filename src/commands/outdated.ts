@@ -31,6 +31,7 @@ import { filterPublicEntries, unconfirmedSkipNote } from "../lib/private-source.
 import { bold, dim, green, red, yellow, cyan, table } from "../utils/output.js";
 import { computeSha, fetchGitHubSourceSkill } from "../updater/source-fetcher.js";
 import type { SkillLockEntry } from "../lockfile/types.js";
+import { collectDeprecations, deprecationJson, deprecationNotice, type DeprecationFinding } from "../lib/deprecation.js";
 
 const TWENTY_FOUR_HOURS = 86_400_000;
 
@@ -110,14 +111,24 @@ function readLockView(scope: OutdatedScope, root?: string): LockView {
 export async function getOutdatedJson(
   rootOrOpts: string | { scope?: OutdatedScope; root?: string } = {},
 ): Promise<
-  { results: CheckUpdateResult[]; pinMap: Map<string, string>; authoredNames: Set<string> } | null
+  {
+    results: CheckUpdateResult[];
+    pinMap: Map<string, string>;
+    authoredNames: Set<string>;
+    deprecations: DeprecationFinding[];
+  } | null
 > {
   const opts = typeof rootOrOpts === "string" ? { root: rootOrOpts } : rootOrOpts;
   return outdatedFromView(readLockView(opts.scope ?? "project", opts.root));
 }
 
 async function outdatedFromView(view: LockView): Promise<
-  { results: CheckUpdateResult[]; pinMap: Map<string, string>; authoredNames: Set<string> } | null
+  {
+    results: CheckUpdateResult[];
+    pinMap: Map<string, string>;
+    authoredNames: Set<string>;
+    deprecations: DeprecationFinding[];
+  } | null
 > {
   const lock = view.skills ? { skills: view.skills } : null;
   const authoredDir = view.authoredDir;
@@ -189,10 +200,32 @@ async function outdatedFromView(view: LockView): Promise<
   // 0932: GitHub-sourced skills update from their repo, not the registry, so
   // a changed SKILL.md upstream is an update even when the registry (which
   // may lag the repo) reports none. Same comparison `vskill update` makes.
-  const [rawResults, sourceChanges] = await Promise.all([
+  // 1486: the source's current SKILL.md says whether a skill is deprecated,
+  // so an installed copy that predates the field is still flagged. Pinned
+  // entries are read too; nothing is removed or overwritten.
+  const [rawResults, sourceChanges, deprecations] = await Promise.all([
     checkUpdates(items),
     githubSourceChanges(publicEntries),
+    collectDeprecations(
+      publicEntries.map(([name, entry]) => ({
+        name,
+        entry,
+        lockDir: view.dirOf.get(name) ?? authoredDir ?? getProjectRoot(),
+      })),
+      { upstream: true },
+    ).catch(() => [] as DeprecationFinding[]),
   ]);
+  const deprecationsByName = new Map<string, DeprecationFinding[]>();
+  for (const f of deprecations) {
+    const key = resolveFullName(f.name, lock?.skills[f.name]?.source ?? "");
+    deprecationsByName.set(key, [...(deprecationsByName.get(key) ?? []), f]);
+  }
+  const withDeprecations = (r: CheckUpdateResult): CheckUpdateResult => {
+    const found = deprecationsByName.get(r.name);
+    return found
+      ? { ...r, deprecations: found.map((f) => ({ skill: f.skill, ...deprecationJson(f.deprecation) })) }
+      : r;
+  };
 
   const results: CheckUpdateResult[] = rawResults.map((r) => {
     const disk = diskVersions.get(r.name) ?? r.installed;
@@ -203,24 +236,24 @@ async function outdatedFromView(view: LockView): Promise<
     }
     const change = sourceChanges.get(r.name);
     if (change) sourceChanges.delete(r.name);
-    return {
+    return withDeprecations({
       ...r,
       installed: disk,
       ...(change
         ? { updateAvailable: true, sourceChanged: true, latest: r.updateAvailable ? r.latest : change.version ?? r.latest }
         : { updateAvailable }),
       ...(warning ? { warning } : {}),
-    } as CheckUpdateResult;
+    } as CheckUpdateResult);
   });
   // A changed GitHub skill the registry did not answer for.
   for (const [name, change] of sourceChanges) {
-    results.push({
+    results.push(withDeprecations({
       name,
       installed: diskVersions.get(name) ?? change.installed,
       latest: change.version,
       updateAvailable: true,
       sourceChanged: true,
-    });
+    }));
   }
 
   const pinMap = new Map<string, string>();
@@ -234,7 +267,7 @@ async function outdatedFromView(view: LockView): Promise<
     }
   }
 
-  return { results, pinMap, authoredNames };
+  return { results, pinMap, authoredNames, deprecations };
 }
 
 /**
@@ -307,7 +340,15 @@ export async function outdatedCommand(opts: { json?: boolean; global?: boolean }
     return;
   }
   if (privateNote && !opts.json) console.log(privateNote);
-  const { results, pinMap } = programmatic;
+  const { results, pinMap, deprecations } = programmatic;
+
+  // 1486: deprecation notices name the replacement. stderr under --json
+  // keeps stdout parseable; the exit code is unchanged.
+  if (deprecations.length > 0) {
+    const out = opts.json ? console.error : console.log;
+    for (const f of deprecations) out(deprecationNotice(f.skill, f.deprecation));
+    if (!opts.json) console.log("");
+  }
 
   const outdated = results.filter((r) => r.updateAvailable);
 

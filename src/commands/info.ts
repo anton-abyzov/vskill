@@ -3,6 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { getSkill } from "../api/client.js";
+import type { SkillDetail } from "../api/client.js";
+import { fetchUpstreamDeprecations, formatDeprecation, readDeprecation, type SkillDeprecation } from "../lib/deprecation.js";
 import { isPrivateSkillName } from "../lib/private-source.js";
 import { bold, green, red, yellow, dim, cyan, spinner } from "../utils/output.js";
 
@@ -26,6 +28,32 @@ function getTrustColor(tier: string): (s: string) => string {
     case "T4": return green;
     default: return dim;
   }
+}
+
+/**
+ * 1486: the deprecation a registry skill declares. The SKILL.md the registry
+ * returns comes first, then the source's current SKILL.md on GitHub, then
+ * the platform's own SkillVersion.deprecated flag. Null when none says so.
+ */
+export async function resolveInfoDeprecation(
+  detail: SkillDetail,
+): Promise<{ deprecation: SkillDeprecation } | { platformMessage: string } | null> {
+  const fromContent = readDeprecation(detail.content);
+  if (fromContent) return { deprecation: fromContent };
+  const repo = detail.repoUrl?.match(/^https?:\/\/github\.com\/([^/]+)\/([^/#?]+?)(?:\.git)?\/?$/);
+  if (repo && detail.skillPath) {
+    const found = await fetchUpstreamDeprecations(detail.name, {
+      version: detail.version,
+      sha: "",
+      tier: detail.tier,
+      installedAt: "",
+      source: `github:${repo[1]}/${repo[2]}`,
+      sourceSkillPath: detail.skillPath,
+    });
+    if (found[0]) return { deprecation: found[0].deprecation };
+  }
+  if (detail.deprecated) return { platformMessage: detail.deprecationMsg || "This skill is deprecated." };
+  return null;
 }
 
 export async function infoCommand(skillName: string): Promise<void> {
@@ -75,6 +103,15 @@ export async function infoCommand(skillName: string): Promise<void> {
         ? green("Verified")
         : yellow("Not verified");
       console.log(`  ${bold("Provenance:")}  ${provLabel}`);
+    }
+
+    const deprecated = await resolveInfoDeprecation(detail).catch(() => null);
+    if (deprecated) {
+      const shortName = detail.name.slice(detail.name.lastIndexOf("/") + 1);
+      const line = "deprecation" in deprecated
+        ? formatDeprecation(shortName, deprecated.deprecation)
+        : `${shortName} is deprecated: ${deprecated.platformMessage}`;
+      console.log(`  ${bold("Deprecated:")}  ${yellow(line)}`);
     }
 
     console.log("");

@@ -12,6 +12,7 @@ import {
 import { isPluginEnabled } from "../settings/index.js";
 import { resolvePluginId } from "../lib/skill-lifecycle.js";
 import { bold, green, red, dim, cyan, yellow, table } from "../utils/output.js";
+import { collectDeprecations, deprecationJson, deprecationNotice, type DeprecationFinding } from "../lib/deprecation.js";
 
 interface ListOptions {
   agents?: boolean;
@@ -61,6 +62,31 @@ function readListLock(global?: boolean): { skills: VskillLock["skills"]; resolut
   return { skills: mergedSkills(resolution.targets), resolution };
 }
 
+/**
+ * 1486: deprecations the installed copies declare, keyed by lock name. Disk
+ * only (no network): `vskill outdated` and `vskill doctor` read the sources.
+ */
+async function installedDeprecations(
+  skills: VskillLock["skills"],
+  resolution: LockResolution,
+): Promise<Map<string, DeprecationFinding[]>> {
+  const dirOf = new Map<string, string>();
+  for (const t of resolution.targets) for (const n of t.names) if (!dirOf.has(n)) dirOf.set(n, t.dir);
+  const findings = await collectDeprecations(
+    Object.entries(skills).map(([name, entry]) => ({ name, entry, lockDir: dirOf.get(name) ?? resolution.projectDir })),
+  ).catch(() => [] as DeprecationFinding[]);
+  const byName = new Map<string, DeprecationFinding[]>();
+  for (const f of findings) byName.set(f.name, [...(byName.get(f.name) ?? []), f]);
+  return byName;
+}
+
+function printDeprecationNotices(byName: Map<string, DeprecationFinding[]>): void {
+  const all = [...byName.values()].flat();
+  if (all.length === 0) return;
+  console.log("");
+  for (const f of all) console.log(deprecationNotice(f.skill, f.deprecation));
+}
+
 async function listAgents(json?: boolean): Promise<void> {
   const installed = await detectInstalledAgents();
   const installedIds = new Set(installed.map((a) => a.id));
@@ -100,9 +126,17 @@ async function listSkills(json?: boolean, global?: boolean): Promise<void> {
   const lock = { skills: read.skills };
 
   const skillNames = Object.keys(lock.skills);
+  const deprecated = await installedDeprecations(lock.skills, read.resolution);
 
   if (json) {
-    console.log(JSON.stringify(lock.skills, null, 2));
+    const out: Record<string, unknown> = {};
+    for (const [name, entry] of Object.entries(lock.skills)) {
+      const found = deprecated.get(name);
+      out[name] = found
+        ? { ...entry, deprecations: found.map((f) => ({ skill: f.skill, ...deprecationJson(f.deprecation) })) }
+        : entry;
+    }
+    console.log(JSON.stringify(out, null, 2));
     return;
   }
 
@@ -134,7 +168,7 @@ async function listSkills(json?: boolean, global?: boolean): Promise<void> {
           ? green
           : dim;
     return [
-      bold(name),
+      bold(name) + (deprecated.has(name) ? ` ${yellow("(deprecated)")}` : ""),
       s.version || "-",
       tierColor(s.tier || "VERIFIED"),
       dim(s.source || "-"),
@@ -156,6 +190,7 @@ async function listSkills(json?: boolean, global?: boolean): Promise<void> {
   }
 
   console.log(table(headers, rows));
+  printDeprecationNotices(deprecated);
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +208,7 @@ interface InstalledRow {
   enabledUser: boolean;
   enabledProject: boolean;
   autoDiscovered: boolean;
+  deprecations?: Array<{ skill: string; message: string; replacedBy: string; since?: string }>;
 }
 
 async function listInstalledWithStatus(json?: boolean, global?: boolean): Promise<void> {
@@ -182,6 +218,7 @@ async function listInstalledWithStatus(json?: boolean, global?: boolean): Promis
 
   const skillNames = Object.keys(lock.skills);
   const cwd = process.cwd();
+  const deprecated = await installedDeprecations(lock.skills, read.resolution);
 
   const rowsData: InstalledRow[] = skillNames.map((name) => {
     const entry = lock.skills[name];
@@ -221,6 +258,11 @@ async function listInstalledWithStatus(json?: boolean, global?: boolean): Promis
     };
   });
 
+  for (const row of rowsData) {
+    const found = deprecated.get(row.name);
+    if (found) row.deprecations = found.map((f) => ({ skill: f.skill, ...deprecationJson(f.deprecation) }));
+  }
+
   if (json) {
     console.log(JSON.stringify(rowsData, null, 2));
     return;
@@ -248,7 +290,9 @@ async function listInstalledWithStatus(json?: boolean, global?: boolean): Promis
       : r.enabledProject
         ? green("enabled")
         : red("disabled");
-    return [bold(r.name), r.version, dim(r.source), userCell, projectCell];
+    const name = bold(r.name) + (r.deprecations ? ` ${yellow("(deprecated)")}` : "");
+    return [name, r.version, dim(r.source), userCell, projectCell];
   });
   console.log(table(headers, rows));
+  printDeprecationNotices(deprecated);
 }

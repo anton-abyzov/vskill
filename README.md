@@ -130,7 +130,7 @@ Install globally for repeat use: `npm i -g vskill`
 
 | Plugin | Skills |
 |---|---|
-| **frontend** | figma-connect, frontend-design, task-skill-announcer |
+| **frontend** | figma-connect, frontend-design, task-skill-announcer (deprecated) |
 | **personal** | obsidian-brain, greet-anton, tax-filing |
 | **marketing** | slack-messaging, social-media-posting |
 | **skills** | skill-builder, scout |

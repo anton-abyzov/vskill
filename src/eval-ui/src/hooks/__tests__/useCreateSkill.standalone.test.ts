@@ -9,8 +9,24 @@
 // rendering Plugin: easychamp after AI generation.
 // ---------------------------------------------------------------------------
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { decideGenerationPinning } from "../useCreateSkill";
+
+// 1486: the AI-name sample below is the smoke-test skill that now lives as an
+// e2e fixture (plugins/frontend/skills/task-skill-announcer is deprecated).
+const FIXTURE_SKILL_MD = fileURLToPath(
+  new URL("../../../../../e2e/fixtures/skills/task-skill-announcer/SKILL.md", import.meta.url),
+);
+const FIXTURE_NAME = readFileSync(FIXTURE_SKILL_MD, "utf8").match(/^name:\s*(\S+)/m)?.[1] ?? "";
+
+describe("task-skill-announcer fixture", () => {
+  it("lives in e2e fixtures with name equal to its folder", () => {
+    expect(FIXTURE_NAME).toBe("task-skill-announcer");
+    expect(readFileSync(FIXTURE_SKILL_MD, "utf8")).not.toMatch(/deprecated:/);
+  });
+});
 
 describe("decideGenerationPinning — forceLayout=3 (standalone mode)", () => {
   it("standalone mode locks out AI suggestedPlugin even when user has not pinned a plugin", () => {
@@ -46,7 +62,7 @@ describe("decideGenerationPinning — forceLayout=3 (standalone mode)", () => {
       userName: "anton-greet",
       userPlugin: "",
       userNewPlugin: "",
-      aiName: "task-skill-announcer",
+      aiName: FIXTURE_NAME,
       aiSuggestedPlugin: { plugin: "easychamp" },
       forceLayout: 3,
     });

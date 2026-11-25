@@ -24,7 +24,7 @@
       "name": "marketing",
       "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, Blotato batch scheduling (X/TikTok/IG/LinkedIn/YT/FB/Threads), Slack messaging, Kie.ai image/video generation, budgeted Apify data gathering, and livestream-to-shorts production",
       "source": "./plugins/marketing",
-      "version": "1.7.0",
+      "version": "1.7.1",
       "category": "marketing"
     },
     {
@@ -38,14 +38,14 @@
       "name": "google-workspace",
       "description": "Google Workspace CLI (gws) — unified access to Gmail, Drive, Sheets, Docs, Calendar, Chat, Admin, and 40+ Google APIs",
       "source": "./plugins/google-workspace",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "utility"
     },
     {
       "name": "frontend",
       "description": "Frontend development — visual design with browser verification, Figma-to-code workflows, Code Connect publishing, design tokens, design system integration across React, Vue, SwiftUI, and Compose, and scroll-driven layered layouts (ScrollCraft)",
       "source": "./plugins/frontend",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "category": "development"
     },
     {

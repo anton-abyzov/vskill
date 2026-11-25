@@ -21,6 +21,7 @@ import { runTier1Scan } from "../scanner/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { isPrivateSource, unconfirmedSkipNote } from "../lib/private-source.js";
 import { fetchFromSource, computeSha } from "../updater/source-fetcher.js";
+import { deprecationNotice, fetchUpstreamDeprecations, readDeprecations } from "../lib/deprecation.js";
 import {
   resolveVersion,
   extractFrontmatterVersion,
@@ -363,6 +364,23 @@ export async function updateCommand(
  * targets install under the lock's directory; global targets install into
  * each agent's user-level skills dir and ~/.agents/skills.
  */
+/**
+ * 1486: print the deprecation the source declares now, with its replacement.
+ * Notices only: a deprecated skill is still updated as usual and never
+ * removed. `content` is what was just fetched; without it the source is read.
+ */
+export async function printUpdateDeprecations(name: string, entry: SkillLockEntry, content?: string): Promise<void> {
+  try {
+    const leaf = name.slice(name.lastIndexOf("/") + 1);
+    const found = content !== undefined
+      ? readDeprecations(content).map((d) => ({ skill: d.name ?? leaf, deprecation: d.deprecation }))
+      : await fetchUpstreamDeprecations(name, entry);
+    for (const f of found) console.log(deprecationNotice(f.skill, f.deprecation));
+  } catch {
+    // A notice must never break an update.
+  }
+}
+
 async function updateTarget(
   target: LockTarget,
   toUpdate: string[],
@@ -384,6 +402,7 @@ async function updateTarget(
     // Skip pinned skills unless --force is used
     if (entry.pinnedVersion && !opts.force) {
       console.log(dim(`${name}: pinned at ${entry.pinnedVersion} — skipping`));
+      await printUpdateDeprecations(name, entry);
       continue;
     }
 
@@ -409,6 +428,7 @@ async function updateTarget(
     const reinstall = global ? userLevelPluginReinstallCommand(name, entry) : null;
     if (reinstall) {
       console.log(dim(`${name}: plugin — update it with ${cyan(reinstall)}; skipping`));
+      await printUpdateDeprecations(name, entry);
       continue;
     }
     if (global && !userLevelSkillOnDisk(detectedAgents, name, entry)) {
@@ -459,6 +479,8 @@ async function updateTarget(
         );
         continue;
       }
+
+      await printUpdateDeprecations(name, entry, result.content);
 
       // 4. SHA comparison — skip if unchanged
       // 0765: BUT the platform may have published a newer logical version

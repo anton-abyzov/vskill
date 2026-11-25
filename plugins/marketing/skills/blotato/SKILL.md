@@ -2,7 +2,7 @@
 name: blotato
 description: "Blotato social-media publishing and scheduling platform — REST API + MCP server. Publish and schedule posts across X/Twitter, TikTok, Instagram, LinkedIn, YouTube, Facebook, Threads, Pinterest, and more from a single integration. Use this skill whenever the user wants to schedule, publish, queue, or batch-post content to multiple social channels at once, especially when limits on browser-based posting tools (Postiz, Buffer) are an issue. Trigger phrases: 'schedule on Blotato', 'use Blotato', 'post to TikTok and X', 'Blotato API', 'bulk-schedule posts'. Also activate when the user references their Blotato account, Blotato dashboard, Blotato API key, or asks about post status / queue verification."
 metadata:
-  version: 1.0.0
+  version: 1.0.2
   tags: blotato, social-media, posting, scheduling, tiktok, twitter, x, instagram, linkedin, threads, youtube, facebook, automation, mcp, api
   author: Anton Abyzov
   repository: https://github.com/anton-abyzov/vskill
@@ -11,6 +11,8 @@ metadata:
 # Blotato Publisher
 
 Publish and schedule social-media posts across X/Twitter, TikTok, Instagram, LinkedIn, YouTube, Facebook, Threads, Pinterest, Bluesky and more — via REST API or the Blotato MCP server. Designed for high-volume launches where browser-based tools (Postiz, Buffer) hit their per-platform UI rate limits.
+
+**MCP route first, this skill as the fallback.** On a host where Blotato's MCP mode is configured (Mode B below, `https://mcp.blotato.com/mcp`), call its `blotato_*` tools directly. This skill stays the fallback: the REST recipes, rate-limit and verification rules here apply on hosts without the MCP server and to batch scripts.
 
 ---
 

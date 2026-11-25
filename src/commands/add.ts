@@ -28,7 +28,7 @@ import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { prepareGitHubSkillBundle } from "./add-github-bundle.js";
 import { writeAgentFiles } from "../installer/canonical.js";
 import type { GitHubSkillBundle } from "../discovery/github-skill-bundle.js";
-import { printDeprecationsIn } from "../lib/deprecation.js";
+import { printDeprecationsIn, printPluginDirDeprecations } from "../lib/deprecation.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { isBinary } from "../scanner/repo-scanner.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
@@ -1481,7 +1481,7 @@ async function installPluginDir(
   // Run tier1 scan on all plugin content
   console.log(dim("Running security scan..."));
   const scanResult = runTier1Scan(content);
-  printDeprecationsIn(content, pluginName); // 1486: name the replacement
+  printPluginDirDeprecations(pluginDir, pluginName); // 1486: name the replacement
 
   const verdictColor =
     scanResult.verdict === "PASS"
@@ -2147,7 +2147,7 @@ async function installRepoPlugin(
   console.log(dim("\nRunning security scan..."));
   const combined = allContent.join("\n---\n");
   const scanResult = runTier1Scan(combined);
-  printDeprecationsIn(combined, pluginName); // 1486: name the replacement
+  for (const s of skills) printDeprecationsIn(s.content, s.name); // 1486: name the replacement
 
   const verdictColor =
     scanResult.verdict === "PASS"

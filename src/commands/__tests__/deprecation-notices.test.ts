@@ -258,11 +258,40 @@ describe("vskill update command path (AC-02)", () => {
 });
 
 describe("vskill install (AC-02)", () => {
-  it("prints a notice for each deprecated skill in installed content", async () => {
-    const { printDeprecationsIn } = await import("../../lib/deprecation.js");
-    printDeprecationsIn(["---\nname: other\n---\n", SOURCE_SKILL].join("\n"), "frontend");
+  it("prints the notice from an installed SKILL.md's own frontmatter, not from examples in other files", async () => {
+    const { printDeprecationsIn, printPluginDirDeprecations } = await import("../../lib/deprecation.js");
+    printDeprecationsIn("---\nname: other\n---\n", "other");
+    expect(logs).toHaveLength(0);
+    printDeprecationsIn(SOURCE_SKILL, "frontend");
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain(NOTICE);
+    // A local plugin folder: each skills/<dir>/SKILL.md on its own.
+    logs.length = 0;
+    const plug = join(root, "plug");
+    mkdirSync(join(plug, "skills", "task-skill-announcer"), { recursive: true });
+    mkdirSync(join(plug, "skills", "active"), { recursive: true });
+    writeFileSync(join(plug, "skills", "task-skill-announcer", "SKILL.md"), SOURCE_SKILL);
+    writeFileSync(join(plug, "skills", "active", "SKILL.md"), "---\nname: active\n---\n```yaml\n---\nmetadata:\n  deprecated: \"true\"\n---\n```\n");
+    printPluginDirDeprecations(plug, "plug");
+    expect(logs).toEqual([expect.stringContaining(NOTICE)]);
+  });
+});
+
+describe("vskill list attribution (AC-02)", () => {
+  it("never attributes an unrelated flat copy to a --plugin install", async () => {
+    // The plugin's own copy (<base>/tools/example/) is gone; an independent
+    // deprecated .claude/skills/example/ exists.
+    const flat = join(root, ".claude", "skills", "example");
+    mkdirSync(flat, { recursive: true });
+    writeFileSync(join(flat, "SKILL.md"), SOURCE_SKILL.replace("name: task-skill-announcer", "name: example"));
+    writeFileSync(join(root, "vskill.lock"), JSON.stringify({
+      version: 1, agents: ["claude-code"], createdAt: "", updatedAt: "",
+      skills: { tools: { version: "1.0.0", sha: "", tier: "VERIFIED", installedAt: "", source: "github:o/r#plugin:tools", scope: "project", files: ["example/SKILL.md"] } },
+    }));
+    const { listCommand } = await import("../list.js");
+    await listCommand({ json: true });
+    const parsed = JSON.parse(logs.join("\n"));
+    expect(parsed.tools.deprecations ?? []).toEqual([]);
   });
 });
 

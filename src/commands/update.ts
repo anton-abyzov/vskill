@@ -21,7 +21,7 @@ import { runTier1Scan } from "../scanner/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { isPrivateSource, unconfirmedSkipNote } from "../lib/private-source.js";
 import { fetchFromSource, computeSha } from "../updater/source-fetcher.js";
-import { collectDeprecations, deprecationNotice, readDeprecations } from "../lib/deprecation.js";
+import { collectDeprecations, deprecationNotice, readDeprecation } from "../lib/deprecation.js";
 import {
   resolveVersion,
   extractFrontmatterVersion,
@@ -379,7 +379,7 @@ export async function printUpdateDeprecations(
   try {
     const leaf = name.slice(name.lastIndexOf("/") + 1);
     const found = content !== undefined
-      ? readDeprecations(content).map((d) => ({ skill: d.name ?? leaf, deprecation: d.deprecation }))
+      ? [readDeprecation(content)].flatMap((d) => (d ? [{ skill: leaf, deprecation: d }] : []))
       : await collectDeprecations([{ name, entry, lockDir }], { upstream: true });
     for (const f of found) console.log(deprecationNotice(f.skill, f.deprecation));
   } catch {

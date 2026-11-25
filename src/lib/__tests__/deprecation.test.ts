@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   fetchUpstreamDeprecations,
   formatDeprecation,
+  printDeprecationsIn,
   readDeprecation,
-  readDeprecations,
 } from "../deprecation.js";
 import type { SkillLockEntry } from "../../lockfile/types.js";
 
@@ -72,6 +72,14 @@ describe("readDeprecation", () => {
   });
 
   it("does not read flow-style or aliased metadata (D-04), or broken YAML", () => {
+    const ambiguous = [
+      '---\nmetadata:\n  "deprecated": "true"\n  deprecated: "false"\n---\n',
+      '---\nexample: &ex\n  deprecated: "true"\nmetadata:\n  version: "1.0.0"\n  <<: *ex\n---\n',
+      '---\nyes: &y "true"\nmetadata:\n  deprecated: *y\n---\n',
+      '---\nmetadata:\n  deprecated: "true"\n----\n# body\n',
+      '---\nmetadata:\n  deprecated: "true"\n',
+    ];
+    for (const content of ambiguous) expect(readDeprecation(content), content).toBeNull();
     expect(readDeprecation('---\nmetadata: { deprecated: "true" }\n---\n')).toBeNull();
     expect(readDeprecation('---\nbase: &m\n  deprecated: "true"\nmetadata: *m\n---\n')).toBeNull();
     expect(readDeprecation("---\nmetadata:\n  deprecated: \"true\n---\n")).toBeNull();
@@ -82,10 +90,15 @@ describe("readDeprecation", () => {
     expect(d).toEqual({ message: "Use x", replacedBy: "none" });
   });
 
-  it("finds every deprecated skill in combined plugin content", () => {
-    const found = readDeprecations([PLAIN, DEPRECATED].join("\n"));
-    expect(found).toHaveLength(1);
-    expect(found[0].name).toBe("task-skill-announcer");
+  it("reads only the leading frontmatter: a YAML example in the body never counts", () => {
+    const active = '---\nname: active\n---\n```yaml\n---\nname: example\nmetadata:\n  deprecated: "true"\n---\n```\n';
+    expect(readDeprecation(active)).toBeNull();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    printDeprecationsIn(active, "active");
+    expect(log).not.toHaveBeenCalled();
+    printDeprecationsIn(DEPRECATED, "fallback");
+    expect(String(log.mock.calls[0]?.[0])).toContain("task-skill-announcer is deprecated");
+    log.mockRestore();
   });
 });
 
@@ -150,6 +163,40 @@ describe("fetchUpstreamDeprecations", () => {
     );
     expect(seen[0]).toBe("https://raw.githubusercontent.com/anton-abyzov/vskill/HEAD/.claude-plugin/marketplace.json");
     expect(found.map((f) => f.skill)).toEqual(["task-skill-announcer"]);
+  });
+
+  it("never attributes another file after a failed read, or a root file that names another skill", async () => {
+    const manifest = JSON.stringify({ plugins: [{ name: "example", source: "./plugins/example" }] });
+    const legacy = DEPRECATED.replace("name: task-skill-announcer", "name: legacy");
+    const plugin = entry({ source: "github:o/r#plugin:example", files: ["SKILL.md"] });
+    const root = (nested: () => Promise<string | null>, rootFile: string) => async (url: string) => {
+      if (url.endsWith("marketplace.json")) return manifest;
+      if (url.endsWith("plugins/example/skills/example/SKILL.md")) return nested();
+      if (url.endsWith("plugins/example/SKILL.md")) return rootFile;
+      return null;
+    };
+    const failing = async () => {
+      throw new Error("503");
+    };
+    // Nested read failed: no claim, even though a deprecated root file exists.
+    expect(await fetchUpstreamDeprecations("example", plugin, { fetchText: root(failing, DEPRECATED.replace("name: task-skill-announcer", "name: example")) })).toEqual([]);
+    // Nested is a 404, but the root file is another skill: no claim.
+    expect(await fetchUpstreamDeprecations("example", plugin, { fetchText: root(async () => null, legacy) })).toEqual([]);
+    // Nested is a 404 and the root names the plugin: a flat plugin.
+    const flat = await fetchUpstreamDeprecations("example", plugin, {
+      fetchText: root(async () => null, DEPRECATED.replace("name: task-skill-announcer", "name: example")),
+    });
+    expect(flat.map((f) => f.skill)).toEqual(["example"]);
+    // Single-skill: a failed sourceSkillPath read never falls back to another path.
+    const single = entry({ source: "github:o/r", sourceSkillPath: "skills/a/SKILL.md" });
+    expect(
+      await fetchUpstreamDeprecations("a", single, {
+        fetchText: async (url) => {
+          if (url.endsWith("skills/a/SKILL.md")) throw new Error("timeout");
+          return DEPRECATED.replace("name: task-skill-announcer", "name: a");
+        },
+      }),
+    ).toEqual([]);
   });
 
   it("reads the default branch when the lock pins a commit as sourceBranch", async () => {

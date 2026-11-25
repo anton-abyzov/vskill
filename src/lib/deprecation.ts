@@ -15,7 +15,7 @@
 // Nothing here removes or overwrites a skill: callers only print notices.
 // ---------------------------------------------------------------------------
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isMap, isScalar, parseDocument, type Document } from "yaml";
@@ -32,7 +32,6 @@ export interface SkillDeprecation {
 }
 
 const FRONTMATTER_RE = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
-const FRONTMATTER_ALL_RE = /(?:^|\n)---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?=\r?\n|$)/g;
 
 function scalarText(node: unknown): string | undefined {
   if (!isScalar(node)) return undefined;
@@ -45,7 +44,8 @@ function scalarText(node: unknown): string | undefined {
 /** Parsed frontmatter, or null when it is not valid YAML. Never throws. */
 function parseFrontmatter(frontmatter: string): Document | null {
   try {
-    const doc = parseDocument(frontmatter, { uniqueKeys: false });
+    // Strict: duplicate keys and merge keys (`<<`) make it unreadable.
+    const doc = parseDocument(frontmatter, { uniqueKeys: true, merge: false });
     return doc.errors.length ? null : doc;
   } catch {
     return null;
@@ -63,7 +63,7 @@ function metadataChildren(doc: Document): Map<string, string> {
   for (const pair of node.items) {
     const key = scalarText(pair.key);
     const value = scalarText(pair.value);
-    if (key === undefined || value === undefined || out.has(key)) continue;
+    if (key === undefined || value === undefined) continue;
     out.set(key, value.trim());
   }
   return out;
@@ -97,23 +97,6 @@ export function readDeprecation(content: string | null | undefined): SkillDeprec
   return fm ? fromDocument(parseFrontmatter(fm[1])) : null;
 }
 
-/**
- * Every deprecated skill in content that may join several SKILL.md files
- * (plugin installs combine them). `name` is the frontmatter name, when set.
- */
-export function readDeprecations(
-  content: string | null | undefined,
-): Array<{ name?: string; deprecation: SkillDeprecation }> {
-  if (typeof content !== "string") return [];
-  const out: Array<{ name?: string; deprecation: SkillDeprecation }> = [];
-  for (const m of content.replace(/^\uFEFF/, "").matchAll(FRONTMATTER_ALL_RE)) {
-    const doc = parseFrontmatter(m[1]);
-    const deprecation = fromDocument(doc);
-    if (deprecation) out.push({ name: documentName(doc), deprecation });
-  }
-  return out;
-}
-
 /** The deprecation an installed SKILL.md on disk declares, or null. */
 export function readInstalledDeprecation(skillMdPath: string | null | undefined): SkillDeprecation | null {
   if (!skillMdPath) return null;
@@ -142,13 +125,31 @@ export function deprecationNotice(name: string, d: SkillDeprecation): string {
 }
 
 /**
- * Print a notice for every deprecated skill in installed content (one SKILL.md
- * or a plugin's combined files). `fallbackName` names a skill whose
- * frontmatter has no name. The install itself goes ahead unchanged.
+ * Print the notice for one installed SKILL.md (its leading frontmatter only;
+ * a YAML example in the body never counts). `fallbackName` names a skill
+ * whose frontmatter has no name. The install itself goes ahead unchanged.
  */
 export function printDeprecationsIn(content: string | null | undefined, fallbackName: string): void {
   try {
-    for (const d of readDeprecations(content)) console.log(deprecationNotice(d.name ?? fallbackName, d.deprecation));
+    const d = readDeprecation(content);
+    if (!d) return;
+    const fm = typeof content === "string" ? content.match(FRONTMATTER_RE) : null;
+    console.log(deprecationNotice((fm && frontmatterName(fm[1])) || fallbackName, d));
+  } catch {
+    // A notice must never break an install.
+  }
+}
+
+/** Notices for a local plugin folder: its root SKILL.md and each skills/<dir>/SKILL.md. */
+export function printPluginDirDeprecations(pluginDir: string, pluginName: string): void {
+  try {
+    const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+    printDeprecationsIn(read(join(pluginDir, "SKILL.md")), pluginName);
+    const skillsDir = join(pluginDir, "skills");
+    if (!existsSync(skillsDir)) return;
+    for (const dir of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (dir.isDirectory()) printDeprecationsIn(read(join(skillsDir, dir.name, "SKILL.md")), dir.name);
+    }
   } catch {
     // A notice must never break an install.
   }
@@ -165,6 +166,7 @@ export function deprecationJson(d: SkillDeprecation): { message: string; replace
 // by a timeout; any failure is "no claim".
 // ---------------------------------------------------------------------------
 
+/** Resolves the body, or null when the file does not exist (404). Throws on any other failure. */
 export type FetchText = (url: string, signal?: AbortSignal) => Promise<string | null>;
 
 export const UPSTREAM_TIMEOUT_MS = 5_000;
@@ -177,24 +179,29 @@ const defaultFetchText: FetchText = async (url, signal) => {
   const res = await fetch(url, { signal, headers: { "User-Agent": "vskill-cli" } });
   if (!res.ok) {
     await res.body?.cancel().catch(() => undefined);
-    return null;
+    if (res.status === 404) return null;
+    throw new Error(`HTTP ${res.status}`);
   }
   return await res.text();
 };
 
 /**
  * One deadline for a whole upstream lookup: every request shares it, and the
- * abort ends in-flight requests instead of leaving them running.
+ * abort ends in-flight requests instead of leaving them running. `get`
+ * resolves the body, null for a definite 404, or undefined for a failure
+ * (network, timeout, other status): a failure is never read as "not there".
  */
 function deadline(timeoutMs: number, fetchText: FetchText) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref?.();
-  const aborted = new Promise<null>((resolve) => controller.signal.addEventListener("abort", () => resolve(null), { once: true }));
-  const get = (url: string): Promise<string | null> =>
+  const aborted = new Promise<undefined>((resolve) =>
+    controller.signal.addEventListener("abort", () => resolve(undefined), { once: true }),
+  );
+  const get = (url: string): Promise<string | null | undefined> =>
     controller.signal.aborted
-      ? Promise.resolve(null)
-      : Promise.race([fetchText(url, controller.signal).catch(() => null), aborted]);
+      ? Promise.resolve(undefined)
+      : Promise.race([fetchText(url, controller.signal).catch(() => undefined), aborted]);
   const done = () => {
     clearTimeout(timer);
     controller.abort();
@@ -234,11 +241,11 @@ export async function fetchUpstreamSkillMds(
       );
       for (const path of paths) {
         const content = await get(`${base}/${path}`);
-        if (!content) continue;
-        // A fallback path may serve another skill: only trust a matching name.
-        const fm = content.match(FRONTMATTER_RE);
-        const declared = fm ? frontmatterName(fm[1]) : undefined;
-        if (path !== entry.sourceSkillPath && declared && declared !== skillName) continue;
+        // A failed read makes no claim; only a definite 404 moves on.
+        if (content === undefined) return [];
+        if (content === null) continue;
+        // A fallback path may serve another skill: only trust its own name.
+        if (path !== entry.sourceSkillPath && declaredName(content) !== skillName) continue;
         return [{ skill: skillName, content }];
       }
       return [];
@@ -258,16 +265,27 @@ export async function fetchUpstreamSkillMds(
     const root = `${base}/${prefix ? `${prefix}/` : ""}`;
     const results = await Promise.all(
       pluginSkillDirs(entry, parsed.pluginName).map(async (dir) => {
-        let content = await get(`${root}skills/${dir}/SKILL.md`);
-        // Flat plugin: its one skill, named after the plugin, is the root SKILL.md.
-        if (!content && dir === parsed.pluginName) content = await get(`${root}SKILL.md`);
-        return content ? { skill: dir, content } : null;
+        const nested = await get(`${root}skills/${dir}/SKILL.md`);
+        if (nested) return { skill: dir, content: nested };
+        // Flat plugin: its one skill, named after the plugin, is the root
+        // SKILL.md. Only after a definite 404, and only when the root file
+        // names that skill.
+        if (nested === null && dir === parsed.pluginName) {
+          const flat = await get(`${root}SKILL.md`);
+          if (flat && declaredName(flat) === dir) return { skill: dir, content: flat };
+        }
+        return null;
       }),
     );
     return results.filter((r): r is { skill: string; content: string } => r !== null);
   } finally {
     done();
   }
+}
+
+function declaredName(content: string): string | undefined {
+  const fm = content.match(FRONTMATTER_RE);
+  return fm ? frontmatterName(fm[1]) : undefined;
 }
 
 /** Skill folders a plugin lock entry installed; a bare SKILL.md is the plugin-named skill. */
@@ -361,10 +379,13 @@ export async function installedSkillMdPaths(
       ...(entry.installedPath
         ? [join(entry.installedPath, skill, "SKILL.md"), join(entry.installedPath, "skills", skill, "SKILL.md"), ...(own ? [join(entry.installedPath, "SKILL.md")] : [])]
         : []),
-      // --plugin installs: <base>/<plugin>/<skill>/, the plugin-named skill in <base>/<plugin>/.
-      ...(parsed.type === "github-plugin" ? bases.map((b) => (own ? join(b, pluginName, "SKILL.md") : join(b, pluginName, skill, "SKILL.md"))) : []),
-      // Marketplace installs: <base>/<skill>/.
-      ...bases.map((b) => join(b, skill, "SKILL.md")),
+      // Only the layout this source's installer writes, so an unrelated copy
+      // of a same-named skill is never attributed to the plugin.
+      ...(parsed.type === "github-plugin"
+        ? // --plugin installs: <base>/<plugin>/<skill>/, the plugin-named skill in <base>/<plugin>/.
+          bases.map((b) => (own ? join(b, pluginName, "SKILL.md") : join(b, pluginName, skill, "SKILL.md")))
+        : // Marketplace installs: <base>/<skill>/.
+          bases.map((b) => join(b, skill, "SKILL.md"))),
     ]);
     if (path) out.push({ skill, path });
   }

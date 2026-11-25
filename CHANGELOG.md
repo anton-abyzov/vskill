@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.19] - 2026-11-25
+
+### Added
+
+- Skill deprecation that names the replacement. A skill marks itself deprecated with flat string keys under `metadata` (`deprecated: "true"`, `deprecated-message`, `replaced-by`, `deprecated-since`). `vskill install`, `update`, `outdated`, `info` and `list` print the message and the replacement; `vskill doctor` reports it as a warning and its exit code ignores it. `outdated` and `doctor` read the source's current SKILL.md, so an install made before the field still learns about it. Nothing is removed or overwritten.
+- Marketing plugin: `stream-to-shorts` skill.
+
+### Changed
+
+- `frontend/task-skill-announcer` is deprecated (1.0.5, no replacement); its test copy moved to `e2e/fixtures/skills/task-skill-announcer`.
+- `google-workspace/gws` (1.0.5) and `marketing/blotato` (1.0.2) point to their MCP route where it is configured; the skill stays the fallback.
+
 ## [Unreleased]
 
 ### Added

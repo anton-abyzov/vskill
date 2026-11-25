@@ -9,8 +9,41 @@
 // rendering Plugin: easychamp after AI generation.
 // ---------------------------------------------------------------------------
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import { decideGenerationPinning } from "../useCreateSkill";
+import { decideGenerationPinning, toKebab } from "../useCreateSkill";
+import { parseFrontmatter } from "../../utils/parseFrontmatter";
+
+// 1486: the AI-name sample below is the smoke-test skill that now lives as an
+// e2e fixture (plugins/frontend/skills/task-skill-announcer is deprecated).
+const FIXTURE_SKILL_MD = fileURLToPath(
+  new URL("../../../../../e2e/fixtures/skills/task-skill-announcer/SKILL.md", import.meta.url),
+);
+const FIXTURE_NAME = readFileSync(FIXTURE_SKILL_MD, "utf8").match(/^name:\s*(\S+)/m)?.[1] ?? "";
+
+describe("task-skill-announcer fixture", () => {
+  it("lives in e2e fixtures with name equal to its folder", () => {
+    expect(FIXTURE_NAME).toBe("task-skill-announcer");
+    expect(readFileSync(FIXTURE_SKILL_MD, "utf8")).not.toMatch(/deprecated:/);
+  });
+
+  it("loads as a complete, working skill through the Studio frontmatter parser", () => {
+    const { metadata, body } = parseFrontmatter(readFileSync(FIXTURE_SKILL_MD, "utf8"));
+    expect(metadata.name).toBe("task-skill-announcer");
+    expect(toKebab(String(metadata.name))).toBe(metadata.name);
+    expect(String(metadata.description)).toMatch(/task skill/);
+    expect(String(metadata.description)).not.toMatch(/^DEPRECATED/);
+    expect((metadata.metadata as Record<string, string>).version).toBe("1.0.3");
+    expect(body).toContain("I'm a task skill");
+    // The loaded fixture name drives the generator exactly as an AI name does.
+    const d = decideGenerationPinning({
+      userName: "", userPlugin: "", userNewPlugin: "",
+      aiName: String(metadata.name), aiSuggestedPlugin: null, forceLayout: 3,
+    });
+    expect(d.applyName).toBe("task-skill-announcer");
+  });
+});
 
 describe("decideGenerationPinning — forceLayout=3 (standalone mode)", () => {
   it("standalone mode locks out AI suggestedPlugin even when user has not pinned a plugin", () => {
@@ -46,7 +79,7 @@ describe("decideGenerationPinning — forceLayout=3 (standalone mode)", () => {
       userName: "anton-greet",
       userPlugin: "",
       userNewPlugin: "",
-      aiName: "task-skill-announcer",
+      aiName: FIXTURE_NAME,
       aiSuggestedPlugin: { plugin: "easychamp" },
       forceLayout: 3,
     });

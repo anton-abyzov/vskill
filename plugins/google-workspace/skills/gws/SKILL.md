@@ -2,7 +2,7 @@
 name: gws
 description: "Google Workspace CLI (gws) — unified command-line tool for Gmail, Drive, Sheets, Docs, Calendar, Chat, Admin, and 40+ Google APIs. Use this skill when the user wants to interact with any Google Workspace service from the terminal or via AI agents, set up gws authentication, configure the gws MCP server, manage Google Drive files, read or send Gmail, create or query Google Sheets, edit Google Docs, manage Calendar events, or automate any Google Workspace workflow. Also activate when the user mentions 'gws', 'google workspace cli', 'google drive cli', 'gmail from terminal', 'sheets api', 'google docs api', 'gws mcp', 'workspace automation', or asks to 'list my drive files', 'send email via cli', 'read my calendar', 'update spreadsheet', 'create a google doc'. Do NOT activate for native Claude MCP integrations (claude_ai_Gmail, claude_ai_Google_Calendar) unless the user explicitly wants to use gws instead, or needs services not covered by native integrations (Sheets, Docs, Drive, Chat, Admin)."
 metadata:
-  version: 1.0.3
+  version: 1.0.5
   tags: google-workspace, gws, gmail, drive, sheets, docs, calendar, chat, admin, mcp, cli, automation
   upstream: https://github.com/googleworkspace/cli
   upstream-version: 0.4.x
@@ -15,6 +15,12 @@ One CLI for all of Google Workspace — Drive, Gmail, Calendar, Sheets, Docs, Ch
 
 **Upstream**: [googleworkspace/cli](https://github.com/googleworkspace/cli) (Apache 2.0)
 **Status**: Pre-v1.0 — breaking changes possible. Pin versions in production scripts.
+
+---
+
+## MCP route first, this skill as the fallback
+
+On a host where the gws MCP server is configured (`gws mcp -s <services>`, see [MCP Server Mode](#mcp-server-mode) below), call its tools directly: they need no shell and return structured results. This skill stays the fallback for hosts without that server, for scripts, and for anything the exposed services do not cover. Check the host's MCP list before shelling out to `gws`.
 
 ---
 

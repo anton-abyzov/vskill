@@ -1,7 +1,7 @@
 {
   "name": "google-workspace",
   "description": "Google Workspace CLI (gws) skill — unified command-line access to Gmail, Drive, Sheets, Docs, Calendar, Chat, Admin, and 40+ Google APIs. Includes MCP server setup, authentication workflows, and agent-optimized usage patterns.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",

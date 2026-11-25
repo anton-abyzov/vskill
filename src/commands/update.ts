@@ -21,6 +21,7 @@ import { runTier1Scan } from "../scanner/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { isPrivateSource, unconfirmedSkipNote } from "../lib/private-source.js";
 import { fetchFromSource, computeSha } from "../updater/source-fetcher.js";
+import { collectDeprecations, deprecationNotice, readDeprecation } from "../lib/deprecation.js";
 import {
   resolveVersion,
   extractFrontmatterVersion,
@@ -363,6 +364,29 @@ export async function updateCommand(
  * targets install under the lock's directory; global targets install into
  * each agent's user-level skills dir and ~/.agents/skills.
  */
+/**
+ * 1486: print the deprecation the skill declares, with its replacement.
+ * Notices only: a deprecated skill is still updated as usual and never
+ * removed. `content` is what was just fetched; without it the installed copy
+ * and the source's current SKILL.md are read (the source wins).
+ */
+export async function printUpdateDeprecations(
+  name: string,
+  entry: SkillLockEntry,
+  content?: string,
+  lockDir: string = process.cwd(),
+): Promise<void> {
+  try {
+    const leaf = name.slice(name.lastIndexOf("/") + 1);
+    const found = content !== undefined
+      ? [readDeprecation(content)].flatMap((d) => (d ? [{ skill: leaf, deprecation: d }] : []))
+      : await collectDeprecations([{ name, entry, lockDir }], { upstream: true });
+    for (const f of found) console.log(deprecationNotice(f.skill, f.deprecation));
+  } catch {
+    // A notice must never break an update.
+  }
+}
+
 async function updateTarget(
   target: LockTarget,
   toUpdate: string[],
@@ -384,6 +408,7 @@ async function updateTarget(
     // Skip pinned skills unless --force is used
     if (entry.pinnedVersion && !opts.force) {
       console.log(dim(`${name}: pinned at ${entry.pinnedVersion} — skipping`));
+      await printUpdateDeprecations(name, entry, undefined, target.dir);
       continue;
     }
 
@@ -409,6 +434,7 @@ async function updateTarget(
     const reinstall = global ? userLevelPluginReinstallCommand(name, entry) : null;
     if (reinstall) {
       console.log(dim(`${name}: plugin — update it with ${cyan(reinstall)}; skipping`));
+      await printUpdateDeprecations(name, entry, undefined, target.dir);
       continue;
     }
     if (global && !userLevelSkillOnDisk(detectedAgents, name, entry)) {
@@ -457,8 +483,11 @@ async function updateTarget(
           yellow(`  ${name}: `) +
             dim("could not fetch update from any source")
         );
+        await printUpdateDeprecations(name, entry, undefined, target.dir);
         continue;
       }
+
+      await printUpdateDeprecations(name, entry, result.content);
 
       // 4. SHA comparison — skip if unchanged
       // 0765: BUT the platform may have published a newer logical version

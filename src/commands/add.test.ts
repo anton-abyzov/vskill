@@ -3490,6 +3490,38 @@ describe("addCommand marketplace integration", () => {
     expect(lockArg.skills["plugin-a"].source).toBe("marketplace:owner/repo#plugin-a");
   });
 
+  it("1486: prints the deprecation and its replacement for each installed marketplace skill", async () => {
+    const deprecated = [
+      "---",
+      "name: test-skill",
+      "metadata:",
+      '  deprecated: "true"',
+      '  deprecated-message: "Old fixture."',
+      '  replaced-by: "mcp:gws:gmail"',
+      "---",
+      "# body",
+    ].join("\n");
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({ ok: true, text: async () => SAMPLE_MARKETPLACE_JSON })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => deprecated,
+      }) as unknown as typeof fetch;
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await addCommand("owner/repo", { yes: true });
+
+    const printed = log.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    log.mockRestore();
+    expect(printed).toContain("test-skill is deprecated: Old fixture. Replaced by: mcp:gws:gmail.");
+  });
+
   it("writes no skill of a plugin when one of its skill folders fails to fetch", async () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({

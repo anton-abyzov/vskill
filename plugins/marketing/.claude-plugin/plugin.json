@@ -1,7 +1,7 @@
 {
   "name": "marketing",
   "description": "Marketing automation skills — social media content creation, posting, engagement, content distribution, audience growth across 11 platforms, Blotato batch scheduling via REST API + MCP, and Slack messaging with context-aware session management, plus budgeted web data gathering with Apify (lead lists, social listening, SERP tracking, review mining), and livestream-to-shorts production (census, tight cuts, captions, checks, schedule)",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",

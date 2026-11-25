@@ -15,6 +15,9 @@
 //   duplicate-name   two different folders visible to one agent declare
 //                    the same frontmatter name
 //   bad-name / bad-description  agentskills.io frontmatter limits
+//   deprecated       the skill (installed copy, or its source now) declares
+//                    metadata.deprecated; a warning naming the replacement,
+//                    never fixed and never fails the exit code (1486)
 //   lock-missing     vskill.lock entry with nothing on disk (no skill
 //                    folder, no plugin cache); report only
 //
@@ -45,6 +48,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { AGENTS_REGISTRY, type AgentDefinition } from "../agents/agents-registry.js";
 import { isValidNamespacedSkillName, splitSkillName, stripClaudeFields } from "../installer/frontmatter.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
+import { fetchUpstreamDeprecations, formatDeprecation, readDeprecation, type FetchText, type SkillDeprecation } from "../lib/deprecation.js";
+import type { SkillLockEntry } from "../lockfile/types.js";
 
 export type DoctorScope = "global" | "project";
 export type DoctorSeverity = "error" | "warning";
@@ -58,7 +63,8 @@ export type DoctorIssueKind =
   | "duplicate-name"
   | "bad-name"
   | "bad-description"
-  | "lock-missing";
+  | "lock-missing"
+  | "deprecated";
 
 export const DOCTOR_ISSUE_KINDS: readonly DoctorIssueKind[] = [
   "divergent",
@@ -71,6 +77,7 @@ export const DOCTOR_ISSUE_KINDS: readonly DoctorIssueKind[] = [
   "bad-name",
   "bad-description",
   "lock-missing",
+  "deprecated",
 ];
 
 const SEVERITY: Record<DoctorIssueKind, DoctorSeverity> = {
@@ -84,6 +91,7 @@ const SEVERITY: Record<DoctorIssueKind, DoctorSeverity> = {
   "bad-name": "warning",
   "bad-description": "warning",
   "lock-missing": "warning",
+  deprecated: "warning",
 };
 
 export interface DoctorIssue {
@@ -130,6 +138,10 @@ export interface DoctorOptions {
   project?: boolean;
   json?: boolean;
   fix?: boolean;
+  /** 1486: read each lock entry's source for deprecations (doctorCommand; default true). */
+  upstream?: boolean;
+  /** Test seam for the upstream read. */
+  fetchText?: FetchText;
   /** Test seams — default to the real home dir, cwd and platform. */
   home?: string;
   cwd?: string;
@@ -529,6 +541,11 @@ interface ScopeScan {
   issues: DoctorIssue[];
 }
 
+/** "is deprecated since X: <message> Replaced by: <r>." (the skill name is shown beside it). */
+function deprecatedMessage(skill: string, d: SkillDeprecation): string {
+  return formatDeprecation(skill, d).slice(skill.length + 1);
+}
+
 function issue(
   kind: DoctorIssueKind,
   scope: DoctorScope,
@@ -707,6 +724,10 @@ function scanScope(
     } else if (desc.length > 1024) {
       issues.push(issue("bad-description", scope, folder, [join(shown, "SKILL.md")],
         `description is ${desc.length} chars (max 1024)`, false));
+    }
+    const deprecation = readDeprecation(md);
+    if (deprecation) {
+      issues.push(issue("deprecated", scope, folder, [join(shown, "SKILL.md")], deprecatedMessage(folder, deprecation), false));
     }
   }
 
@@ -998,19 +1019,71 @@ function printReport(report: DoctorReport, fix: boolean): void {
   }
 
   const fixable = report.issues.filter((i) => i.fixable).length;
+  const deprecated = report.issues.filter((i) => i.kind === "deprecated").length;
+  const problems = report.issues.length - deprecated;
   console.log("");
   console.log(
-    `${bold(String(report.issues.length))} problem${report.issues.length === 1 ? "" : "s"}` +
+    `${bold(String(problems))} problem${problems === 1 ? "" : "s"}` +
+      (deprecated > 0 ? `, ${yellow(String(deprecated))} deprecated skill${deprecated === 1 ? "" : "s"} (warning; nothing changed)` : "") +
       (fixable > 0 && !fix ? `, ${cyan(String(fixable))} fixable with ${cyan("vskill doctor --fix")}` : ""),
   );
 }
 
-export async function doctorCommand(opts: DoctorOptions): Promise<void> {
+/**
+ * 1486: deprecations the sources declare now for each lock entry, so a copy
+ * installed before the field existed is still flagged. Network reads stay
+ * out of the pure runDoctor; offline or slow sources are skipped silently.
+ */
+export async function upstreamDeprecationIssues(
+  report: DoctorReport,
+  opts: DoctorOptions = {},
+): Promise<DoctorIssue[]> {
+  const home = opts.home ?? os.homedir();
+  const cwd = opts.cwd ?? process.cwd();
+  const seen = new Set(report.issues.filter((i) => i.kind === "deprecated").map((i) => `${i.scope}:${i.skill}`));
+  const found = await Promise.all(
+    report.scopes.flatMap((scope) =>
+      readScopeLocks(scope, home, cwd).map(async (rec) => {
+        const hits = await fetchUpstreamDeprecations(rec.name, rec.entry as SkillLockEntry, { fetchText: opts.fetchText });
+        return hits
+          .filter((h) => !seen.has(`${scope}:${h.skill}`))
+          .map((h) => issue("deprecated", scope, h.skill, [rec.lockPath],
+            `${deprecatedMessage(h.skill, h.deprecation)} (the source says so now; the installed copy predates it)`, false));
+      }),
+    ),
+  );
+  const out: DoctorIssue[] = [];
+  for (const i of found.flat()) {
+    const key = `${i.scope}:${i.skill}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(i);
+  }
+  return out;
+}
+
+/** Checks plus the upstream deprecation read (what `vskill doctor` runs). */
+export async function runDoctorWithSources(opts: DoctorOptions = {}): Promise<DoctorReport> {
   const report = runDoctor(opts);
+  if (opts.upstream === false) return report;
+  const extra = await upstreamDeprecationIssues(report, opts).catch(() => [] as DoctorIssue[]);
+  for (const i of extra) report.summary[i.kind]++;
+  report.issues.push(...extra);
+  report.remaining = report.issues.length;
+  return report;
+}
+
+/** Deprecated skills are warnings only: they never fail the exit code. */
+export function doctorExitCode(report: DoctorReport): number {
+  return report.issues.some((i) => i.kind !== "deprecated") ? 1 : 0;
+}
+
+export async function doctorCommand(opts: DoctorOptions): Promise<void> {
+  const report = await runDoctorWithSources(opts);
   if (opts.json) {
     console.log(JSON.stringify(report, null, 2));
   } else {
     printReport(report, !!opts.fix);
   }
-  process.exitCode = report.remaining === 0 ? 0 : 1;
+  process.exitCode = doctorExitCode(report);
 }

@@ -28,6 +28,7 @@ import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { prepareGitHubSkillBundle } from "./add-github-bundle.js";
 import { writeAgentFiles } from "../installer/canonical.js";
 import type { GitHubSkillBundle } from "../discovery/github-skill-bundle.js";
+import { printDeprecationsIn, printPluginDirDeprecations } from "../lib/deprecation.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { isBinary } from "../scanner/repo-scanner.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
@@ -660,6 +661,7 @@ async function installMarketplaceRepo(
       if (installedSkillNames.length > 0) {
         const tier = plugin.isUnregistered ? "unverified" : "verified";
         console.log(green(`  ✓ ${bold(plugin.name)}`) + dim(` (${installedSkillNames.join(", ")}) [${tier}]`));
+        for (const s of pluginSkillContents.get(plugin.name) ?? []) printDeprecationsIn(s.content, s.name); // 1486
         results.push({ name: plugin.name, installed: true, method: plugin.isUnregistered ? "extraction-unregistered" : "extraction" });
       } else {
         console.log(red(`  ✗ ${bold(plugin.name)}`) + dim(" — no SKILL.md found"));
@@ -1610,6 +1612,7 @@ async function installPluginDir(
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
+  printPluginDirDeprecations(pluginDir, pluginName); // 1486: name the replacement
 
   // Print summary
   console.log(
@@ -1738,6 +1741,7 @@ async function installOneGitHubSkill(
 
   // Tier 1 scan
   const scanResult = runTier1Scan(content);
+  printDeprecationsIn(content, skillName); // 1486: name the replacement
 
   if ((scanResult.verdict === "FAIL" || scanResult.verdict === "CONCERNS") && !opts.force) {
     const verdictColor = scanResult.verdict === "FAIL" ? red : yellow;
@@ -2143,6 +2147,7 @@ async function installRepoPlugin(
   console.log(dim("\nRunning security scan..."));
   const combined = allContent.join("\n---\n");
   const scanResult = runTier1Scan(combined);
+  for (const s of skills) printDeprecationsIn(s.content, s.name); // 1486: name the replacement
 
   const verdictColor =
     scanResult.verdict === "PASS"
@@ -3076,6 +3081,7 @@ async function installFromRegistry(
   // Tier 1 scan
   console.log(dim("\nRunning security scan..."));
   const scanResult = runTier1Scan(content);
+  printDeprecationsIn(content, skillName); // 1486: name the replacement
 
   const verdictColor =
     scanResult.verdict === "PASS"
@@ -3281,6 +3287,7 @@ async function installSingleSkillLegacy(
   // Run tier1 scan
   console.log(dim("\nRunning security scan..."));
   const scanResult = runTier1Scan(content);
+  printDeprecationsIn(content, skillName); // 1486: name the replacement
 
   const verdictColor =
     scanResult.verdict === "PASS"

@@ -139,8 +139,12 @@ describe("vskill outdated (AC-02, AC-03)", () => {
     writeProject(OLD_COPY);
     rawResponses.set(RAW, SOURCE_SKILL);
     const { outdatedCommand } = await import("../outdated.js");
+    // The source changed since install, so --json also reports an update (exit 1).
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     await outdatedCommand({ json: true });
+    expect(exit).toHaveBeenCalledWith(1);
     const parsed = JSON.parse(logs.at(-1)!);
+    expect(parsed[0]).toMatchObject({ updateAvailable: true, sourceChanged: true });
     expect(parsed[0].deprecations[0].replacedBy).toBe("none");
     expect(errs.join("\n")).toContain(NOTICE);
   });

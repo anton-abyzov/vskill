@@ -1481,7 +1481,6 @@ async function installPluginDir(
   // Run tier1 scan on all plugin content
   console.log(dim("Running security scan..."));
   const scanResult = runTier1Scan(content);
-  printPluginDirDeprecations(pluginDir, pluginName); // 1486: name the replacement
 
   const verdictColor =
     scanResult.verdict === "PASS"
@@ -1613,6 +1612,7 @@ async function installPluginDir(
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
+  printPluginDirDeprecations(pluginDir, pluginName); // 1486: name the replacement
 
   // Print summary
   console.log(

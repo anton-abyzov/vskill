@@ -39,6 +39,12 @@ vi.mock("../../lib/github-fetch.js", async (orig) => ({
     return body === undefined ? new Response("nope", { status: 404 }) : new Response(body, { status: 200 });
   }),
 }));
+vi.mock("../../agents/agents-registry.js", async (orig) => ({
+  ...(await orig<typeof import("../../agents/agents-registry.js")>()),
+  detectInstalledAgents: vi.fn(async () => [
+    { id: "claude-code", displayName: "Claude Code", localSkillsDir: ".claude/skills", globalSkillsDir: "~/.claude/skills" },
+  ]),
+}));
 vi.mock("../../lib/private-source.js", async (orig) => ({
   ...(await orig<typeof import("../../lib/private-source.js")>()),
   filterPublicEntries: vi.fn(async (entries: unknown[]) => entries),
@@ -97,10 +103,16 @@ beforeEach(() => {
   errs = [];
   vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void logs.push(a.map(String).join(" ")));
   vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void errs.push(a.map(String).join(" ")));
+  // D-06: upstream reads are plain unauthenticated GETs on raw URLs.
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const body = rawResponses.get(String(url));
+    return body === undefined ? new Response("nope", { status: 404 }) : new Response(body, { status: 200 });
+  }));
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   process.chdir(prevCwd);
   rmSync(root, { recursive: true, force: true });
   process.exitCode = 0;
@@ -143,10 +155,37 @@ describe("vskill outdated (AC-02, AC-03)", () => {
     const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     await outdatedCommand({ json: true });
     expect(exit).toHaveBeenCalledWith(1);
-    const parsed = JSON.parse(logs.at(-1)!);
+    // stdout is exactly one JSON payload; the notice went to stderr.
+    const parsed = JSON.parse(logs.join("\n"));
     expect(parsed[0]).toMatchObject({ updateAvailable: true, sourceChanged: true });
     expect(parsed[0].deprecations[0].replacedBy).toBe("none");
     expect(errs.join("\n")).toContain(NOTICE);
+  });
+});
+
+describe("vskill outdated with an installer-shaped pinned lock (AC-03)", () => {
+  it("reads the default branch, not the pinned commit stored as sourceBranch", async () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    writeProject(OLD_COPY, { pinnedVersion: "1.0.3", sourceBranch: sha, sourceCommitSha: sha });
+    rawResponses.set(RAW.replace("/main/", `/${sha}/`), OLD_COPY);
+    rawResponses.set(RAW.replace("/main/", "/HEAD/"), SOURCE_SKILL);
+    const { getOutdatedJson } = await import("../outdated.js");
+    const data = await getOutdatedJson({ scope: "project", root });
+    expect(data?.deprecations.map((d) => d.origin)).toEqual(["source"]);
+  });
+
+  it("flags an old flat-layout plugin install from the plugin-root SKILL.md", async () => {
+    mkdirSync(join(root, ".claude", "skills", "solo"), { recursive: true });
+    writeFileSync(join(root, ".claude", "skills", "solo", "SKILL.md"), OLD_COPY.replace("task-skill-announcer", "solo"));
+    writeFileSync(join(root, "vskill.lock"), JSON.stringify({
+      version: 1, agents: ["claude-code"], createdAt: "", updatedAt: "",
+      skills: { solo: { version: "1.0.0", sha: "", tier: "VERIFIED", installedAt: "", source: "github:o/r#plugin:solo", scope: "project", files: ["SKILL.md"] } },
+    }));
+    rawResponses.set("https://raw.githubusercontent.com/o/r/HEAD/.claude-plugin/marketplace.json", JSON.stringify({ plugins: [{ name: "solo", source: "./plugins/solo" }] }));
+    rawResponses.set("https://raw.githubusercontent.com/o/r/HEAD/plugins/solo/SKILL.md", SOURCE_SKILL.replace("name: task-skill-announcer", "name: solo"));
+    const { getOutdatedJson } = await import("../outdated.js");
+    const data = await getOutdatedJson({ scope: "project", root });
+    expect(data?.deprecations).toEqual([expect.objectContaining({ name: "solo", skill: "solo", origin: "source" })]);
   });
 });
 
@@ -160,11 +199,34 @@ describe("vskill list (AC-02)", () => {
     expect(printed).toContain(NOTICE);
   });
 
+  it("finds skills where the plugin and marketplace installers put them", async () => {
+    // --repo --plugin: <base>/<plugin>/<skill>/ with a nested file record, in the shared folder.
+    const nested = join(root, ".agents", "skills", "frontend", "task-skill-announcer");
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(nested, "SKILL.md"), SOURCE_SKILL);
+    // Marketplace: <base>/<skill>/ with a skills record.
+    const flat = join(root, ".claude", "skills", "gws");
+    mkdirSync(flat, { recursive: true });
+    writeFileSync(join(flat, "SKILL.md"), SOURCE_SKILL.replace("name: task-skill-announcer", "name: gws"));
+    writeFileSync(join(root, "vskill.lock"), JSON.stringify({
+      version: 1, agents: ["claude-code"], createdAt: "", updatedAt: "",
+      skills: {
+        frontend: { version: "0.2.1", sha: "", tier: "VERIFIED", installedAt: "", source: "github:anton-abyzov/vskill#plugin:frontend", scope: "project", files: ["task-skill-announcer/SKILL.md"] },
+        "google-workspace": { version: "0.1.1", sha: "", tier: "VERIFIED", installedAt: "", source: "marketplace:anton-abyzov/vskill#google-workspace", pluginDir: true, skills: ["gws"], scope: "project" },
+      },
+    }));
+    const { listCommand } = await import("../list.js");
+    await listCommand({});
+    const printed = logs.join("\n");
+    expect(printed).toContain(NOTICE);
+    expect(printed).toContain("gws is deprecated since 1.0.5");
+  });
+
   it("adds deprecations to --json", async () => {
     writeProject(SOURCE_SKILL);
     const { listCommand } = await import("../list.js");
     await listCommand({ json: true });
-    const parsed = JSON.parse(logs.at(-1)!);
+    const parsed = JSON.parse(logs.join("\n"));
     expect(parsed["task-skill-announcer"].deprecations[0].message).toContain("smoke-test fixture");
   });
 });
@@ -182,6 +244,16 @@ describe("vskill update (AC-02)", () => {
     rawResponses.set(RAW, SOURCE_SKILL);
     await printUpdateDeprecations("task-skill-announcer", entry);
     expect(logs.join("\n")).toContain(NOTICE);
+  });
+});
+
+describe("vskill update command path (AC-02)", () => {
+  it("names the replacement for a pinned registry skill from its installed copy, and changes nothing", async () => {
+    const path = writeProject(SOURCE_SKILL, { source: "registry:task-skill-announcer", sourceSkillPath: undefined, sourceBranch: undefined, pinnedVersion: "1.0.5" });
+    const { updateCommand } = await import("../update.js");
+    await updateCommand(undefined, {});
+    expect(logs.join("\n")).toContain(NOTICE);
+    expect(readFileSync(path, "utf8")).toBe(SOURCE_SKILL);
   });
 });
 

@@ -661,6 +661,7 @@ async function installMarketplaceRepo(
       if (installedSkillNames.length > 0) {
         const tier = plugin.isUnregistered ? "unverified" : "verified";
         console.log(green(`  ✓ ${bold(plugin.name)}`) + dim(` (${installedSkillNames.join(", ")}) [${tier}]`));
+        for (const s of pluginSkillContents.get(plugin.name) ?? []) printDeprecationsIn(s.content, s.name); // 1486
         results.push({ name: plugin.name, installed: true, method: plugin.isUnregistered ? "extraction-unregistered" : "extraction" });
       } else {
         console.log(red(`  ✗ ${bold(plugin.name)}`) + dim(" — no SKILL.md found"));

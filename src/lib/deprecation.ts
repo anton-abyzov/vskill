@@ -22,7 +22,6 @@ import { getPluginSource } from "../marketplace/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import type { SkillLockEntry } from "../lockfile/types.js";
 import { yellow } from "../utils/output.js";
-import { githubFetch } from "./github-fetch.js";
 
 export interface SkillDeprecation {
   message: string;
@@ -172,7 +171,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   return Promise.race([p.catch(() => fallback), timeout]).finally(() => clearTimeout(timer));
 }
 
+// Loaded on first use: local-only callers (list, install notices) never pull
+// in the GitHub token and keychain modules.
 const defaultFetchText: FetchText = async (url) => {
+  const { githubFetch } = await import("./github-fetch.js");
   const res = await githubFetch(url);
   return res.ok ? await res.text() : null;
 };

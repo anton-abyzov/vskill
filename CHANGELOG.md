@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- Stray skills `hi-atlantis` (a joke skill that activated on every prompt), `tiktokpost` (a placeholder) and `stub-skill-76f6713e` (stub provider output committed by mistake). Stub provider output under `.claude/skills/stub-skill-*/` is now ignored.
+
+### Changed
+
+- `personal/stripe-refund-auditor` is deprecated (1.0.1, no replacement): it was sample output of the multi-file skill generator. Its test copy moved to `e2e/fixtures/skills/stripe-refund-auditor`.
+
 ## [1.2.19] - 2026-11-25
 
 ### Added
@@ -11,12 +21,6 @@
 
 - `frontend/task-skill-announcer` is deprecated (1.0.5, no replacement); its test copy moved to `e2e/fixtures/skills/task-skill-announcer`.
 - `google-workspace/gws` (1.0.5) and `marketing/blotato` (1.0.2) point to their MCP route where it is configured; the skill stays the fallback.
-
-## [Unreleased]
-
-### Added
-
-- Marketing plugin 1.7.0: `stream-to-shorts` skill, which turns a long livestream into fast vertical shorts. It ships scripts for the cut, captions, layout, privacy, audio and caption checks, per-platform exports, a schedule planner and a post helper that redacts credentials. Install it with `vskill install anton-abyzov/vskill/stream-to-shorts`.
 
 ## [1.2.18] - 2026-11-14
 

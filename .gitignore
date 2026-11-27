@@ -42,6 +42,8 @@ test/verify/reports/
 # Runtime artifacts
 .claude/agent-memory/
 vskill.lock
+# Stub provider output (src/eval/llm.ts), never a real skill
+.claude/skills/stub-skill-*/
 
 # Test artifacts
 coverage/

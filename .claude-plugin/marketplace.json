@@ -59,7 +59,7 @@
       "name": "personal",
       "description": "Personal knowledge and finance automation — autonomous Obsidian vault management (PARA + LLM Wiki) and end-to-end corporate/personal tax preparation from Xero, bank statements, and Google Drive",
       "source": "./plugins/personal",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "category": "productivity"
     },
     {
